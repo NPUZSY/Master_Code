@@ -4,13 +4,20 @@ import matplotlib.pyplot as plt
 from matplotlib import colormaps as cm  # 明确从matplotlib.cm模块导入get_cmap函数
 from scipy.interpolate import RegularGridInterpolator
 from scipy.ndimage import gaussian_filter
-plt.rcParams['font.family'] = 'Times New Roman'
-plt.rcParams['font.size'] = 12
+
+# 配置字体信息
+config = {
+    "font.family": 'serif',
+    "font.size": 18,
+    "mathtext.fontset": 'stix',
+    "font.serif": ['SimSun'],  # 设置中文字体为宋体
+}
+plt.rcParams.update(config)
 global_cmap = "coolwarm"
 
 np.random.seed(0)
 plt.ion()
-SAVE_FIGURES = False
+SAVE_FIGURES = True
 
 
 def data_read_process():
@@ -111,49 +118,6 @@ def interpolation(probability_matrix, min_temp, max_temp, interpolation_factor=2
     return probability_matrix_interpolated, min_temp, num_intervals_interpolated, temp_interval_new
 
 
-# 生成曲面图
-def plot_surf(probability_matrix, min_temp, max_temp, num_intervals, temp_interval, temp_probabilities, z_label, title):
-    # 绘制三维图
-    fig = plt.figure()
-
-    ax = fig.add_subplot(111, projection='3d')
-    x_axis_labels = [min_temp + i * temp_interval for i in range(num_intervals)]
-    y_axis_labels = [min_temp + i * temp_interval for i in range(num_intervals)]
-    X, Y = np.meshgrid(x_axis_labels, y_axis_labels)
-    Z = probability_matrix[:, :, 0]
-
-    # 使用plot_surface绘制曲面，并设置cmap参数来实现颜色随高度（Z轴数据）变化
-    # 这里选用'viridis'颜色映射，你也可以根据喜好选择其他如'plasma'、'jet'等
-    surf = ax.plot_surface(X, Y, Z, cmap=global_cmap, alpha=0.8)
-    ax.view_init(elev=30, azim=250)
-    fig.subplots_adjust(
-        top=0.88,
-        bottom=0.11,
-        left=0.125,
-        right=0.9,
-        hspace=0.2,
-        wspace=0.2
-    )
-    cax = fig.add_axes((0.72, 0.2, 0.03, 0.6))
-
-    # 添加颜色条，指定cax参数为新创建的轴对象，同时设置其他参数
-    fig.colorbar(surf, cax=cax, shrink=0.5, aspect=5)
-
-    ax.set_xlabel('Current Temperature/℃')
-    ax.set_ylabel('Next Temperature/℃')
-    ax.set_zlabel(z_label, labelpad=10)
-    ax.set_title(title)
-    # 绘制表示温度出现概率的曲线
-    x_curve = np.arange(num_intervals) * temp_interval + min_temp
-    z_curve = temp_probabilities
-    ax.plot(x_curve, [max_temp] * len(x_curve), z_curve, '#FFA500', label='Temperature Transition')
-    ax.legend(fontsize=16)
-
-    plt.get_current_fig_manager().window.showMaximized()
-    if SAVE_FIGURES: plt.savefig(f"../Figures/{title}_surf.png")
-    plt.ioff()
-
-
 def plot_bar(probability_matrix, min_temp, num_intervals, temp_interval, z_label, title):
     fig = plt.figure()
 
@@ -199,6 +163,49 @@ def plot_bar(probability_matrix, min_temp, num_intervals, temp_interval, z_label
     plt.ioff()
 
 
+# 生成曲面图
+def plot_surf(probability_matrix, min_temp, max_temp, num_intervals, temp_interval, temp_probabilities, z_label, title):
+    # 绘制三维图
+    fig = plt.figure()
+
+    ax = fig.add_subplot(111, projection='3d')
+    x_axis_labels = [min_temp + i * temp_interval for i in range(num_intervals)]
+    y_axis_labels = [min_temp + i * temp_interval for i in range(num_intervals)]
+    X, Y = np.meshgrid(x_axis_labels, y_axis_labels)
+    Z = probability_matrix[:, :, 0]
+
+    # 使用plot_surface绘制曲面，并设置cmap参数来实现颜色随高度（Z轴数据）变化
+    # 这里选用'viridis'颜色映射，你也可以根据喜好选择其他如'plasma'、'jet'等
+    surf = ax.plot_surface(X, Y, Z, cmap=global_cmap, alpha=0.8)
+    ax.view_init(elev=30, azim=250)
+    fig.subplots_adjust(
+        top=0.88,
+        bottom=0.11,
+        left=0.125,
+        right=0.9,
+        hspace=0.2,
+        wspace=0.2
+    )
+    cax = fig.add_axes((0.72, 0.2, 0.03, 0.6))
+
+    # 添加颜色条，指定cax参数为新创建的轴对象，同时设置其他参数
+    fig.colorbar(surf, cax=cax, shrink=0.5, aspect=5)
+
+    ax.set_xlabel('当前温度/℃')
+    ax.set_ylabel('下一时刻温度/℃')
+    ax.set_zlabel(z_label, labelpad=10)
+    ax.set_title(title)
+    # 绘制表示温度出现概率的曲线
+    x_curve = np.arange(num_intervals) * temp_interval + min_temp
+    z_curve = temp_probabilities
+    ax.plot(x_curve, [max_temp] * len(x_curve), z_curve, '#FFA500', label='Temperature Transition')
+    ax.legend(fontsize=16)
+
+    plt.get_current_fig_manager().window.showMaximized()
+    if SAVE_FIGURES: plt.savefig(f"../Figures/{title}_surf.png")
+    plt.ioff()
+
+
 if __name__ == '__main__':
     probability_matrix_, min_temp_, max_temp_, num_intervals, temp_interval, temp_probabilities_ = data_read_process()
     # plot_bar(probability_matrix_, min_temp_, num_intervals, temp_interval, 'Transition Times', "Source Data")
@@ -211,13 +218,16 @@ if __name__ == '__main__':
     probability_matrix_ = gaussian_filter(probability_matrix_[:, :, 0], sigma=5)[:, :, np.newaxis]
     # plot_bar(probability_matrix_, min_temp_, num_intervals, temp_interval, 'Transition Times', "Filter Data")
     # 插值
-    probability_matrix_, min_temp_, num_intervals_interpolated, temp_interval_new= interpolation(probability_matrix_, min_temp_, max_temp_,1)
+    probability_matrix_, min_temp_, num_intervals_interpolated, temp_interval_new = interpolation(probability_matrix_,
+                                                                                                  min_temp_, max_temp_,
+                                                                                                  1)
     # plot_bar(probability_matrix_, min_temp, num_intervals_interpolated, temp_interval, 'Transition Times', "Interpolated Data")
 
     # 归一化
     probability_matrix_ = normalize(probability_matrix_)
     # plot_bar(probability_matrix_, min_temp_, num_intervals_interpolated, temp_interval, 'Transition Probability', "Normalized Data")
 
-    plot_surf(probability_matrix_, min_temp_, max_temp_, num_intervals_interpolated, temp_interval_new, temp_probabilities_,  'Transition Probability',
-              "Temperature Transition")
+    plot_surf(probability_matrix_, min_temp_, max_temp_, num_intervals_interpolated, temp_interval_new,
+              temp_probabilities_, '转移概率',
+              "温度转移概率矩阵")
     plt.show()

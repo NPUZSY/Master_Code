@@ -1,0 +1,40 @@
+  ___                          
+ / _ \  _ __    ___  _ __ ___  
+| | | || '_ \  / _ \| '_ ` _ \ 
+| |_| || |_) ||  __/| | | | | |
+ \___/ | .__/  \___||_| |_| |_|
+       |_|                     
+Simulation Date : 2024-12-20 15:20:17.978975
+**********
+Chakraborty Model
+
+**********
+Simulation Inputs : 
+
+E0 : 0.6
+KH2 : 0.000843
+KH2O : 0.000281
+KO2 : 0.00252
+N0 : 1
+Name : Chakraborty_Test
+R : 0.00328125
+T : 1273
+i-start : 0.0
+i-step : 0.01
+i-stop : 0.01
+rho : 1.145
+u : 0.8
+**********
+I :0.01 A 
+
+E : nan V
+FC Efficiency : None 
+FC Power : None W
+FC Voltage : None V
+Nernst Gain : None V
+Ohmic Loss : None V
+PH2 : 0.0 atm
+PH2O : 0.0 atm
+PO2 : 0.0 atm
+Power-Thermal : None W
+###########
