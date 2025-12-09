@@ -79,10 +79,10 @@ env = Envs()
 # ❗ MARL 模型加载
 # --------------------------------------------------------------------
 net_data = '1209'  # 您的日期目录
-train_id = '2'  # 您的训练 ID 目录
+train_id = '3'  # 您的训练 ID 目录
 # ❗ 注意：这里需要替换为您实际训练保存的模型名称基础
 # 假设您保存的模型文件名为: {BASE_NAME}_FC.pth, {BASE_NAME}_BAT.pth, {BASE_NAME}_SC.pth
-net_name_base = 'bs64_lr50_episode_1000_pool10_freq10_MARL_MARL_IQL_32x20x2_FINAL'
+net_name_base = 'bs64_lr50_episode_567_pool10_freq10_MARL_MARL_IQL_32x20x2_MAX_R-14_SC.pth'
 
 # 实例化三个独立的 DQN 智能体
 FC_Agent = IndependentDQN("FC_Agent", N_FC_ACTIONS)
@@ -237,8 +237,9 @@ ax3.legend(handles=[taking_off_patch, cruising_patch, underwater_patch],
            loc='upper right',
            frameon=True, framealpha=0.8, edgecolor='black', facecolor='white')
 
-plt.savefig(f"../../nets/Chap3/{net_data}/{train_id}/{net_name_base}_Test_Result.svg")  # ❗ 命名更新
-plt.savefig(f"../../Figures/EMS_MARL_Result_color.svg")  # ❗ 命名更新
+plt.savefig(f"../../nets/Chap3/{net_data}/{train_id}/{net_name_base}_Test_Result.svg")
+plt.savefig(f"../../nets/Chap3/{net_data}/{train_id}/{net_name_base}_Test_Result.png")
+# plt.savefig(f"../../Figures/EMS_MARL_Result_color.svg")
 print(f"Total Reward: {ep_r:.2f}")
 print(f"Test total time: {time_finish - time_start:.4f}s")
 if step > 0:
