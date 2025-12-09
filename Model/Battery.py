@@ -7,7 +7,7 @@ plt.rcParams['font.family'] = 'Times New Roman'
 plt.rcParams['font.size'] = 16
 
 class BatteryPlot:
-    def __init__(self, soc=0.5, capacity=1540 * 3600, time_step=1e-3):
+    def __init__(self, soc=0.6, capacity=1540 * 360, time_step=1e-3):
         # 电池容量为1.54KWh，换算成W*s = J
         self.soc = soc  # 电池SoC
         self.soc_ref = 0.6
@@ -74,7 +74,7 @@ class BatteryPlot:
 
 
 class BatterySimple:
-    def __init__(self, soc=0.5, capacity=1540 * 3600):
+    def __init__(self, soc=0.6, capacity=1540 * 360):
         self.soc = soc  # 电池SoC
         self.soc_ref = 0.6
         self.capacity_total = capacity
