@@ -1,7 +1,7 @@
 import numpy as np
 import math
-import gym
-from gym import spaces
+import gymnasium as gym
+from gymnasium import spaces
 import time  # 保持 time 模块导入，以便测试脚本可以运行
 
 # 请确认 Model 中存在这些模块文件并导出相应类

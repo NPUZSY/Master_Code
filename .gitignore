@@ -3,3 +3,5 @@
 /Data
 /.idea
 *.pth
+*.pyc
+events*
