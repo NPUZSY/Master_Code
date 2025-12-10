@@ -6,7 +6,7 @@ import time
 import numpy as np
 import matplotlib.patches as mpatches
 
-
+# 导入环境
 from Scripts.Env import Envs
 
 # ====================================================================
@@ -79,10 +79,9 @@ env = Envs()
 # ❗ MARL 模型加载
 # --------------------------------------------------------------------
 net_data = '1210'  # 您的日期目录
-train_id = '0'  # 您的训练 ID 目录
+train_id = '6'  # 您的训练 ID 目录
 # ❗ 注意：这里需要替换为您实际训练保存的模型名称基础
-# 假设您保存的模型文件名为: {BASE_NAME}_FC.pth, {BASE_NAME}_BAT.pth, {BASE_NAME}_SC.pth
-net_name_base = 'bs64_lr50_ep_188_pool10_freq10_MARL_MARL_IQL_32x20x2_MAX_R-15'
+net_name_base = 'bs64_lr20_ep_1732_pool1000_freq10_MARL_MARL_IQL_32x20x2_MAX_R-6688'
 
 # 实例化三个独立的 DQN 智能体
 FC_Agent = IndependentDQN("FC_Agent", N_FC_ACTIONS)
@@ -118,6 +117,9 @@ temperature = env.temperature[:-1]  # 温度 profile
 time_start = time.time()
 ep_r = 0  # 初始化 ep_r
 
+# ❗ 核心修改：初始化总等效氢气消耗量累加器
+total_equivalent_H2_consumption = 0.0
+
 # --------------------------------------------------------------------
 # ❗ 运行主循环
 # --------------------------------------------------------------------
@@ -129,7 +131,15 @@ while True:
     action_list = [a_fc, a_bat, a_sc]  # 组合动作
 
     # take action
-    s_, r, done, _ = env.step(action_list)
+    s_, r, done, info = env.step(action_list)  # ❗ 接收 info 字典
+
+    # --------------------------------------------------------------------
+    # ❗ 核心修改：累加等效氢气消耗量
+    # --------------------------------------------------------------------
+    # C_fc_g 是 FC 氢耗，C_bat_g 是电池等效氢耗，两者之和是总等效氢耗（克）
+    H2_step_g = info.get("C_fc_g", 0.0) + info.get("C_bat_g", 0.0)
+    total_equivalent_H2_consumption += H2_step_g
+    # --------------------------------------------------------------------
 
     # --------------------------------------------------------------------
     # ❗ 数据记录：使用新状态 s_ (t 时刻动作产生的结果) 记录所有组件功率和 SOC
@@ -156,7 +166,7 @@ while True:
 time_finish = time.time()
 
 # --------------------------------------------------------------------
-# ❗ 绘图部分更新
+# ❗ 绘图部分更新 (保持不变)
 # --------------------------------------------------------------------
 # 定义颜色列表
 best_color = ['#3570a8', '#f09639', '#42985e', '#c84343', '#8a7ab5']
@@ -215,8 +225,6 @@ ax1.legend(lines, labels, loc='lower center', ncol=3)  # 调整图例位置和�
 
 # 设置横轴和纵轴显示范围
 plt.xlim(0, 600)
-# ❗ 移除 plt.ylim(30, -100)，避免覆盖 Power 轴或 SOC 轴的自动缩放
-# plt.ylim(30, -100) # 原代码注释，如果需要固定温度轴范围，请取消注释并确认范围
 
 # 起飞阶段背景和数据
 ax1.axvspan(0, 150, alpha=0.2, color='lightblue', label='Taking off & Climbing')
@@ -240,6 +248,12 @@ ax3.legend(handles=[taking_off_patch, cruising_patch, underwater_patch],
 plt.savefig(f"../../nets/Chap3/{net_data}/{train_id}/{net_name_base}_Test_Result.svg")
 plt.savefig(f"../../nets/Chap3/{net_data}/{train_id}/{net_name_base}_Test_Result.png", dpi=1200)
 # plt.savefig(f"../../Figures/EMS_MARL_Result_color.svg")
+
+# --------------------------------------------------------------------
+# ❗ 核心修改：最终输出总等效氢气消耗量
+# --------------------------------------------------------------------
+print("\n--- Test Summary ---")
+print(f"Total Equivalent H2 Consumption: {total_equivalent_H2_consumption:.4f} g")
 print(f"Total Reward: {ep_r:.2f}")
 print(f"Test total time: {time_finish - time_start:.4f}s")
 if step > 0:
@@ -248,4 +262,6 @@ else:
     print("No steps were executed.")
 print(f"Final Battery SOC: {soc_bat[-1] if soc_bat else 'N/A'}")
 print(f"Final SuperCap SOC: {soc_sc_list[-1] if soc_sc_list else 'N/A'}")
+print("--------------------")
+
 plt.show()

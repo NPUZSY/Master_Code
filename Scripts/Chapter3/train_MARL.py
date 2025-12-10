@@ -35,12 +35,12 @@ torch.set_default_dtype(torch.float32)
 
 # Hyper Parameters
 BATCH_SIZE = 64
-LR = 0.005
+LR = 0.002
 EPSILON = 0.9
-GAMMA = 0.9
+GAMMA = 0.98
 TARGET_REPLACE_ITER = 100
-POOL_SIZE = 10
-EPISODE = 1000
+POOL_SIZE = 1000
+EPISODE = 2000
 LEARN_FREQUENCY = 10
 
 REAL_TIME_DRAW = False
@@ -50,9 +50,9 @@ REAL_TIME_DRAW = False
 # --------------------------------------------------------------------
 # RL 学习率调度器参数 (基于奖励)
 LR_PATIENCE = 50  # 奖励连续多少个 episode 没有显著提高时触发 LR 减小
-LR_FACTOR = 0.5  # 触发时 LR 减小的比例
+LR_FACTOR = 0.4  # 触发时 LR 减小的比例
 # 早停参数 (基于奖励)
-EARLY_STOP_PATIENCE = 200  # 奖励连续多少个 episode 没有显著提高时触发早停
+EARLY_STOP_PATIENCE = 100  # 奖励连续多少个 episode 没有显著提高时触发早停
 REWARD_THRESHOLD = 0.001  # 判定奖励提高的阈值 (绝对值)
 # --------------------------------------------------------------------
 
