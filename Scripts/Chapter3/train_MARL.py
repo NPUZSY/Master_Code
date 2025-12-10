@@ -34,10 +34,10 @@ writer = SummaryWriter()
 torch.set_default_dtype(torch.float32)
 
 # Hyper Parameters
-BATCH_SIZE = 32
-LR = 0.002
+BATCH_SIZE = 64
+LR = 0.001
 EPSILON = 0.9
-GAMMA = 0.95
+GAMMA = 0.9
 TARGET_REPLACE_ITER = 100
 POOL_SIZE = 10
 EPISODE = 2000
