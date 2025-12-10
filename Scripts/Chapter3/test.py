@@ -15,9 +15,27 @@ project_root = os.path.abspath(os.path.join(current_dir, '../../'))
 # 将项目根目录添加到sys.path
 if project_root not in sys.path:
     sys.path.append(project_root)
-plt.rcParams['font.family'] = 'Times New Roman'
+
 # 导入环境
 from Scripts.Env import Envs
+
+
+
+
+# 1. 自动找字体文件（Linux常见路径）
+font_path = '/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman.ttf'
+
+# 2. 加载字体+刷新缓存
+if os.path.exists(font_path):
+    import matplotlib.font_manager as fm
+    fm.fontManager.addfont(font_path)
+    # fm._rebuild()  # 重建缓存
+    # 3. 全局生效
+    plt.rcParams.update({
+        'font.sans-serif': ['Times New Roman'],
+        'axes.unicode_minus': False  # 解决负号显示
+    })
+
 
 # ====================================================================
 # ❗ 必须重新定义网络和智能体类，以正确加载 MARL 模型

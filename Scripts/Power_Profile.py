@@ -4,7 +4,7 @@ import matplotlib.patches as mpatches
 import numpy as np
 from scipy.signal import savgol_filter
 
-plt.rcParams['font.family'] = ('Times New Roman', 'SimHei')
+plt.rcParams['font.family'] = ('Times New Roman')
 plt.rcParams['font.size'] = 12
 
 # 默认噪声参数与滤波参数（可在函数调用时覆盖）
