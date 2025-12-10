@@ -2,6 +2,7 @@
 /venv
 /Data
 /.idea
+/runs
 *.pth
 *.pyc
 events*
