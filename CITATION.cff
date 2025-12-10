@@ -1,5 +1,5 @@
 cff-version: 1.2.0
-title: "Meta-RL UAV Energy Management"
+title: "Meta-RL CDV Energy Management"
 message: "If you use this code, please cite it as below."
 authors:
   - family-names: "Zhao"
