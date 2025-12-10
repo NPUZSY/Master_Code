@@ -153,8 +153,8 @@ def plot_bar(probability_matrix, min_temp, num_intervals, temp_interval, z_label
         wspace=0.2
     )
 
-    ax.set_xlabel('Current Temperature/℃')
-    ax.set_ylabel('Next Temperature/℃')
+    ax.set_xlabel('Current Temperature/°C')
+    ax.set_ylabel('Next Temperature/°C')
     ax.set_zlabel(z_label, labelpad=10)
     ax.set_title(title)
 
@@ -191,8 +191,8 @@ def plot_surf(probability_matrix, min_temp, max_temp, num_intervals, temp_interv
     # 添加颜色条，指定cax参数为新创建的轴对象，同时设置其他参数
     fig.colorbar(surf, cax=cax, shrink=0.5, aspect=5)
 
-    ax.set_xlabel('当前温度/℃')
-    ax.set_ylabel('下一时刻温度/℃')
+    ax.set_xlabel('当前温度/°C')
+    ax.set_ylabel('下一时刻温度/°C')
     ax.set_zlabel(z_label, labelpad=10)
     ax.set_title(title)
     # 绘制表示温度出现概率的曲线

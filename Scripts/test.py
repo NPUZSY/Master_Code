@@ -92,7 +92,7 @@ ax3.spines['right'].set_position(('outward', 65))
 l5, = ax3.plot(times, temperature, label='Environment Temperature', color=colors[4], alpha=LINES_ALPHA)
 
 # 设置第二个 y 轴的标签和颜色
-ax3.set_ylabel('Environment Temperature/℃', color=colors[4], fontsize=LABEL_FONT_SIZE)
+ax3.set_ylabel('Environment Temperature/°C', color=colors[4], fontsize=LABEL_FONT_SIZE)
 ax3.tick_params(axis='y', labelcolor=colors[4], labelsize=LABEL_FONT_SIZE)
 
 # 合并两个坐标轴的图例

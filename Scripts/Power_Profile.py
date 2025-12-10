@@ -138,7 +138,7 @@ def plot_base_curve(time: np.ndarray,
 
     # 温度曲线
     ax_temp.set_xlabel('时间 (s)')
-    ax_temp.set_ylabel('环境温度 (℃)', color='#1f77b4')
+    ax_temp.set_ylabel('环境温度 (°C)', color='#1f77b4')
     temperature_line, = ax_temp.plot(time, temperature, color='#1f77b4', label='环境温度')
     ax_temp.tick_params(axis='y', labelcolor='#1f77b4')
 
@@ -189,7 +189,7 @@ def plot_base_curve(time: np.ndarray,
     try:
         ax_temp.annotate('', xy=(time[mid_idx], 15), xytext=(time[mid_idx], 15 + 20), arrowprops=arrow_style)
         ax_power.annotate('', xy=(time[mid_idx], 1000 - 200), xytext=(time[mid_idx], 1000 + 200), arrowprops=arrow_style)
-        ax_temp.annotate('25 ± 10℃', xy=(time[mid_idx], 5), fontsize=16)
+        ax_temp.annotate('25 ± 10°C', xy=(time[mid_idx], 5), fontsize=16)
         ax_power.annotate('1000±200W', xy=(time[mid_idx], 1250), fontsize=16)
     except Exception:
         pass

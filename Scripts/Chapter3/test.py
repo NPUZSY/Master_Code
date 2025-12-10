@@ -316,7 +316,7 @@ ax3 = ax1.twinx()
 ax3.spines['right'].set_position(('outward', 65))
 l5, = ax3.plot(times, temperature[:len(times)], label='Environment Temperature', color=colors[4], alpha=LINES_ALPHA)
 
-ax3.set_ylabel('Environment Temperature/℃', color=colors[4], fontsize=LABEL_FONT_SIZE)
+ax3.set_ylabel('Environment Temperature/°C', color=colors[4], fontsize=LABEL_FONT_SIZE)
 ax3.tick_params(axis='y', labelcolor=colors[4], labelsize=LABEL_FONT_SIZE)
 
 lines = [l1, l2, l3, l6, l4, l7, l5]
