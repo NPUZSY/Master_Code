@@ -5,8 +5,17 @@ import torch.nn.functional as F
 import time
 import numpy as np
 import matplotlib.patches as mpatches
+import sys
 import os
 
+# 获取当前脚本所在目录
+current_dir = os.path.dirname(os.path.abspath(__file__))
+# 向上回溯到项目根目录（Master_Code）
+project_root = os.path.abspath(os.path.join(current_dir, '../../'))
+# 将项目根目录添加到sys.path
+if project_root not in sys.path:
+    sys.path.append(project_root)
+plt.rcParams['font.family'] = 'Times New Roman'
 # 导入环境
 from Scripts.Env import Envs
 
@@ -61,10 +70,14 @@ class IndependentDQN(object):
 # ====================================================================
 env = Envs()
 
+# 论文中使用的训练ID 存在本地
+# net_data = '1210'
+# train_id = '1'
+# net_name_base = 'bs64_lr10_ep_464_pool10_freq10_MARL_MARL_IQL_32x20x2_MAX_R-679'
+
 net_data = '1210'
-# 论文中使用的训练ID
-train_id = '1'
-net_name_base = 'bs64_lr10_ep_464_pool10_freq10_MARL_MARL_IQL_32x20x2_MAX_R-679'
+train_id = '4'
+net_name_base = 'bs32_lr20_ep_96_pool10_freq10_MARL_MARL_IQL_32x20x2_MAX_R-6462'
 
 FC_Agent = IndependentDQN("FC_Agent", N_FC_ACTIONS)
 Bat_Agent = IndependentDQN("Bat_Agent", N_BAT_ACTIONS)
@@ -354,4 +367,4 @@ for k, v in timing_summary.items():
 print("==============================================================")
 
 
-plt.show()
+# plt.show()
