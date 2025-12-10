@@ -5,10 +5,7 @@ import torch.nn.functional as F
 import time
 import numpy as np
 import matplotlib.patches as mpatches
-import sys
 import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
-
 
 # 导入环境
 from Scripts.Env import Envs
@@ -65,8 +62,9 @@ class IndependentDQN(object):
 env = Envs()
 
 net_data = '1210'
-train_id = '6'
-net_name_base = 'bs64_lr20_ep_1732_pool1000_freq10_MARL_MARL_IQL_32x20x2_MAX_R-6688'
+# 论文中使用的训练ID
+train_id = '1'
+net_name_base = 'bs64_lr10_ep_464_pool10_freq10_MARL_MARL_IQL_32x20x2_MAX_R-679'
 
 FC_Agent = IndependentDQN("FC_Agent", N_FC_ACTIONS)
 Bat_Agent = IndependentDQN("Bat_Agent", N_BAT_ACTIONS)
@@ -228,4 +226,132 @@ fc_h2_ratio = fc_h2 / total_h2 if total_h2 > 0 else 0.0
 bat_h2_ratio = bat_h2 / total_h2 if total_h2 > 0 else 0.0
 
 # 2) 电池能量回收时间与比重
-bat_charge_time_s = bat_ch
+bat_charge_time_s = bat_charge_steps * dt
+bat_charge_ratio = bat_charge_steps / total_steps
+
+# 3) 电池 SOC 全局变化范围
+soc_bat_range = (max(soc_bat) - min(soc_bat)) if soc_bat else 0.0
+
+# 4) 超级电容吸收/释放能量（J 与 Wh），以及功率匹配度（SC 未参与比例）
+sc_absorb_J = sc_absorb_power_sum  # J (since power*dt with dt in s)
+sc_release_J = sc_release_power_sum
+sc_absorb_Wh = sc_absorb_J / 3600.0
+sc_release_Wh = sc_release_J / 3600.0
+
+# SC 未参与步数（|P_sc| < threshold）
+sc_inactive_steps = sum(1 for p in power_sc if abs(p) < sc_inactive_threshold)
+sc_inactive_ratio = sc_inactive_steps / total_steps  # 不依靠 SC 的工作点比例
+
+# 5) RL 计时细分统计（总时长、平均每步、占比）
+timing_summary = {}
+for k, v in episode_times.items():
+    timing_summary[k] = {
+        'total_s': v,
+        'avg_per_step_s': v / total_steps,
+        'ratio': v / total_time if total_time > 0 else 0.0
+    }
+
+# --------------------------------------------------------------------
+# 绘图（保持你原来的图；我没改布局，仅确保绘制使用最新数据）
+# --------------------------------------------------------------------
+# 定义颜色列表
+best_color = ['#3570a8', '#f09639', '#42985e', '#c84343', '#8a7ab5']
+article_color = ['#f09639', '#c84343', '#42985e', '#8a7ab5', '#3570a8']
+colors = article_color
+LINES_ALPHA = 1
+LABEL_FONT_SIZE = 18
+
+fig, ax1 = plt.subplots(figsize=(15, 5))
+fig.subplots_adjust(top=0.965, bottom=0.125, left=0.085, right=0.875, hspace=0.2, wspace=0.2)
+
+l1, = ax1.plot(times, loads[:len(times)], label='Power Demand', color=colors[0], alpha=LINES_ALPHA)
+l2, = ax1.plot(times, power_fc, label='Power Fuel Cell', color=colors[1], alpha=LINES_ALPHA)
+l3, = ax1.plot(times, battery_power, label='Power Battery', color=colors[2], alpha=LINES_ALPHA)
+l6, = ax1.plot(times, power_sc, label='Power SuperCap', color='k', linestyle='--', alpha=LINES_ALPHA)
+
+ax1.set_xlabel('Time/s', fontsize=LABEL_FONT_SIZE)
+ax1.set_ylabel('Power/W', color='black', fontsize=LABEL_FONT_SIZE)
+ax1.tick_params(axis='x', labelcolor='black', labelsize=LABEL_FONT_SIZE)
+ax1.tick_params(axis='y', labelcolor='black', labelsize=LABEL_FONT_SIZE)
+
+ax2 = ax1.twinx()
+l4, = ax2.plot(times, soc_bat, label='Battery SOC', color=colors[3], alpha=LINES_ALPHA)
+l7, = ax2.plot(times, soc_sc_list, label='SuperCap SOC', color='grey', linestyle=':', alpha=LINES_ALPHA)
+
+ax2.set_ylabel('SOC', color='black', fontsize=LABEL_FONT_SIZE)
+ax2.tick_params(axis='y', labelcolor='black', labelsize=LABEL_FONT_SIZE)
+
+ax3 = ax1.twinx()
+ax3.spines['right'].set_position(('outward', 65))
+l5, = ax3.plot(times, temperature[:len(times)], label='Environment Temperature', color=colors[4], alpha=LINES_ALPHA)
+
+ax3.set_ylabel('Environment Temperature/℃', color=colors[4], fontsize=LABEL_FONT_SIZE)
+ax3.tick_params(axis='y', labelcolor=colors[4], labelsize=LABEL_FONT_SIZE)
+
+lines = [l1, l2, l3, l6, l4, l7, l5]
+labels = [line.get_label() for line in lines]
+ax1.legend(lines, labels, loc='lower center', ncol=3)
+
+plt.xlim(0, 600)
+ax1.axvspan(0, 150, alpha=0.2, color='lightblue', label='Taking off & Climbing')
+ax1.axvspan(150, 450, alpha=0.2, color='lightgreen', label='Cruising')
+ax1.axvspan(450, 600, alpha=0.2, color='salmon', label='Descending & underwater')
+ax1.grid(which='both', axis='both', linestyle='--', linewidth=0.5, alpha=0.5)
+
+taking_off_patch = mpatches.Patch(color='lightblue', label='Air flight', alpha=0.2)
+cruising_patch = mpatches.Patch(color='lightgreen', label='Surface navigation', alpha=0.2)
+underwater_patch = mpatches.Patch(color='salmon', label='Underwater navigation', alpha=0.2)
+ax3.legend(handles=[taking_off_patch, cruising_patch, underwater_patch],
+           fontsize='large',
+           loc='upper right',
+           frameon=True, framealpha=0.8, edgecolor='black', facecolor='white')
+
+os.makedirs(f"../../nets/Chap3/{net_data}/{train_id}", exist_ok=True)
+plt.savefig(f"../../nets/Chap3/{net_data}/{train_id}/{net_name_base}_Test_Result.svg")
+plt.savefig(f"../../nets/Chap3/{net_data}/{train_id}/{net_name_base}_Test_Result.png", dpi=1200)
+
+# --------------------------------------------------------------------
+# 最终打印汇总信息（包含你要求的所有指标）
+# --------------------------------------------------------------------
+print("\n===================== 测试结果汇总与分析 =====================")
+
+print(f"【等效氢耗】")
+print(f"系统总等效氢耗：{total_h2:.6f} g")
+print(f"  ├─ 燃料电池氢耗：{fc_h2:.6f} g，占比 {fc_h2_ratio*100:.2f}%")
+print(f"  └─ 电池等效氢耗：{bat_h2:.6f} g，占比 {bat_h2_ratio*100:.2f}%")
+print()
+
+print(f"【电池 SOC 情况】")
+print(f"电池 SOC 最低值：{min(soc_bat):.6f}")
+print(f"电池 SOC 最高值：{max(soc_bat):.6f}")
+print(f"电池 SOC 全局变化范围（最大-最小）：{soc_bat_range:.6f}")
+print()
+
+print(f"【电池充电（能量回收）特性】")
+print(f"电池进入充电状态的时间：{bat_charge_time_s:.2f} s")
+print(f"充电步数比例：{bat_charge_ratio*100:.2f}%")
+print()
+
+print(f"【超级电容能量流动特性】")
+print(f"超级电容释放能量：{sc_release_J:.4f} J  (约 {sc_release_Wh:.6f} Wh)")
+print(f"超级电容吸收能量：{sc_absorb_J:.4f} J  (约 {sc_absorb_Wh:.6f} Wh)")
+print(f"SC 未参与工作（|P_sc| < 阈值）的步数：{sc_inactive_steps}/{total_steps}  ({sc_inactive_ratio*100:.2f}%)")
+print(f"功率匹配度（不依赖超级电容的比例）：{sc_inactive_ratio*100:.2f}%")
+print()
+
+print(f"【整体回报与时间性能】")
+print(f"智能体累积奖励：{ep_r:.2f}")
+print(f"测试总耗时：{total_time:.4f} s")
+if total_steps > 0:
+    print(f"平均单步耗时：{total_time/total_steps*1000:.4f} ms/step")
+print()
+
+print("【动作选择、环境步进、日志处理等阶段的详细耗时占比】")
+print("阶段名称                     总耗时(s)      平均每步耗时(ms)    占测试总时长(%)")
+for k, v in timing_summary.items():
+    print(f"{k:20s}   {v['total_s']:.6f} s      {(v['avg_per_step_s']*1000):.6f} ms/step      {(v['ratio']*100):.2f}%")
+
+print("==============================================================")
+
+
+plt.show()
