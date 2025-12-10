@@ -1,20 +1,5 @@
 import os
-import sys  # ❗ 引入 sys 模块
-
-# --------------------------------------------------------------------
-# 导入路径修正：将项目根目录添加到 sys.path
-# --------------------------------------------------------------------
-# 获取当前文件（train_MARL.py）的目录
-script_dir = os.path.dirname(os.path.abspath(__file__))
-# 向上两级，得到项目根目录: E:\Master\毕业\硕士毕业论文代码仓库 (假设您的项目结构)
-project_root = os.path.abspath(os.path.join(script_dir, '..', '..'))
-
-# 将项目根目录添加到 Python 搜索路径中
-if project_root not in sys.path:
-    sys.path.append(project_root)
-# --------------------------------------------------------------------
-
-
+import sys
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -23,8 +8,18 @@ from torch.utils.tensorboard import SummaryWriter
 import time
 import numpy as np
 from tqdm import tqdm
+from torch.optim.lr_scheduler import ReduceLROnPlateau  # ❗ 新增：学习率调度器
 
-# 修正：现在可以正确地通过 Scripts 找到 Env 模块
+# --------------------------------------------------------------------
+# 导入路径修正：将项目根目录添加到 sys.path
+# --------------------------------------------------------------------
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.abspath(os.path.join(script_dir, '..', '..'))
+
+if project_root not in sys.path:
+    sys.path.append(project_root)
+# --------------------------------------------------------------------
+
 from Scripts.Env import Envs
 
 # ====================================================================
@@ -38,7 +33,7 @@ env = Envs()
 writer = SummaryWriter()
 torch.set_default_dtype(torch.float32)
 
-# Hyper Parameters (保持原设定)
+# Hyper Parameters
 BATCH_SIZE = 64
 LR = 0.005
 EPSILON = 0.9
@@ -46,10 +41,21 @@ GAMMA = 0.9
 TARGET_REPLACE_ITER = 100
 POOL_SIZE = 10
 EPISODE = 1000
-# 学习频率
 LEARN_FREQUENCY = 10
 
 REAL_TIME_DRAW = False
+
+# --------------------------------------------------------------------
+# ❗ 新增：RL 和 Early Stopping 超参数
+# --------------------------------------------------------------------
+# RL 学习率调度器参数 (基于奖励)
+LR_PATIENCE = 50  # 奖励连续多少个 episode 没有显著提高时触发 LR 减小
+LR_FACTOR = 0.5  # 触发时 LR 减小的比例
+# 早停参数 (基于奖励)
+EARLY_STOP_PATIENCE = 200  # 奖励连续多少个 episode 没有显著提高时触发早停
+REWARD_THRESHOLD = 0.001  # 判定奖励提高的阈值 (绝对值)
+# --------------------------------------------------------------------
+
 
 MEMORY_CAPACITY = env.step_length * POOL_SIZE
 current_timestamp = time.time()
@@ -61,32 +67,25 @@ remark = "MARL_IQL_32x20x2"
 N_STATES = env.observation_space.shape[0]
 N_TOTAL_ACTIONS = env.N_ACTIONS
 
-# --------------------------------------------------------------------
-# MARL 动作分解修正 (Action Decomposition for I-DQN)
-# --------------------------------------------------------------------
-N_FC_ACTIONS = 32  # FC 功率变化率 (32 份)
-N_BAT_ACTIONS = 20  # Battery 输出功率 (20 份)
-N_SC_ACTIONS = 2  # SuperCap 状态 (切入/切出)
+# MARL 动作分解修正
+N_FC_ACTIONS = 32
+N_BAT_ACTIONS = 20
+N_SC_ACTIONS = 2
 
 N_EXPECTED_ACTIONS = N_FC_ACTIONS * N_BAT_ACTIONS * N_SC_ACTIONS
 
 if N_EXPECTED_ACTIONS != N_TOTAL_ACTIONS:
     print(
         f"警告：动作分解 {N_EXPECTED_ACTIONS} 与环境 N_TOTAL_ACTIONS({N_TOTAL_ACTIONS}) 不匹配。代码将继续运行，但请检查 Env.py。")
-    pass  # 允许不匹配继续运行，但用户应确保环境动作空间正确
+    pass
 
 Base_Model_Name = ""
 
 
 class Net(nn.Module):
-    """
-    通用 Q-网络结构。输入全局状态 N_STATES，输出各自局部动作空间 N_ACTIONS。
-    """
-
     def __init__(self, N_ACTIONS):
         torch.manual_seed(0)
         super(Net, self).__init__()
-        # 使用更大的网络层以适应更大的动作空间
         self.input = nn.Linear(N_STATES, 64)
         self.input.weight.data.normal_(0, 0.1)
 
@@ -106,25 +105,28 @@ class Net(nn.Module):
 
 
 class IndependentDQN(object):
-    """
-    Independent DQN (I-DQN) 智能体类
-    """
-
     def __init__(self, agent_name, N_AGENT_ACTIONS, shared_memory, memory_counter_ref):
 
         self.agent_name = agent_name
         self.N_AGENT_ACTIONS = N_AGENT_ACTIONS
 
-        # 使用局部动作空间大小初始化网络
         self.eval_net = Net(N_AGENT_ACTIONS).to(device)
         self.target_net = Net(N_AGENT_ACTIONS).to(device)
 
         self.learn_step_counter = 0
-        self.memory = shared_memory  # 引用共享内存
-        self.memory_counter_ref = memory_counter_ref  # 引用内存计数器
+        self.memory = shared_memory
+        self.memory_counter_ref = memory_counter_ref
 
         self.optimizer = torch.optim.Adam(self.eval_net.parameters(), lr=LR)
         self.loss_func = nn.MSELoss()
+
+        # ❗ 实例化 ReduceLROnPlateau 调度器，监控奖励值，mode='max'
+        self.scheduler = ReduceLROnPlateau(self.optimizer,
+                                           mode='max',
+                                           factor=LR_FACTOR,
+                                           patience=LR_PATIENCE,
+                                           verbose=True,
+                                           min_lr=1e-6)
 
     def load_net(self, path):
         self.eval_net.load_state_dict(torch.load(path, map_location=device))
@@ -135,23 +137,18 @@ class IndependentDQN(object):
         temp = torch.FloatTensor(state_input)
         state_input = torch.unsqueeze(temp.to(device), 0)
 
-        # 策略：训练初期随机探索，后期ε-greedy
         epsilon = 1.0 if train else EPSILON
 
-        if np.random.uniform() < epsilon:  # greedy
+        if np.random.uniform() < epsilon:
             with torch.no_grad():
                 actions_value = self.eval_net.forward(state_input)
-                # 选择 Q 值最大的局部动作索引
                 action_index = torch.max(actions_value, 1)[1].item()
-        else:  # random
+        else:
             action_index = np.random.randint(0, self.N_AGENT_ACTIONS)
 
         return action_index
 
-    # learn 方法现在接受 agent_idx 来索引共享内存中的局部动作
     def learn(self, agent_idx):
-        memory_counter = self.memory_counter_ref[0]
-
         if self.learn_step_counter % TARGET_REPLACE_ITER == 0:
             self.target_net.load_state_dict(self.eval_net.state_dict())
         self.learn_step_counter += 1
@@ -162,16 +159,12 @@ class IndependentDQN(object):
 
         b_s = torch.FloatTensor(b_memory[:, :N_STATES]).to(device)
 
-        # 局部动作索引：FC=0, Bat=1, SC=2
         action_column_index = N_STATES + agent_idx
         b_a = torch.LongTensor(b_memory[:, action_column_index:action_column_index + 1].astype(int)).to(device)
 
-        # 奖励在 N_STATES + 3 处 (因为有 3 个动作列)
         b_r = torch.FloatTensor(b_memory[:, N_STATES + 3:N_STATES + 4]).to(device)
-        # s' 在 N_STATES + 4 处开始
         b_s_ = torch.FloatTensor(b_memory[:, N_STATES + 4:]).to(device)
 
-        # I-DQN Q-target 计算
         q_eval = self.eval_net(b_s).gather(1, b_a)
         q_next = self.target_net(b_s_).detach()
         q_target = b_r + GAMMA * q_next.max(1)[0].view(BATCH_SIZE, 1)
@@ -186,7 +179,6 @@ class IndependentDQN(object):
 def get_max_folder_name(directory):
     if not os.path.exists(directory):
         return 0
-    # 过滤出目录名且为数字的文件夹
     folders = [int(name) for name in os.listdir(directory) if
                os.path.isdir(os.path.join(directory, name)) and name.isdigit()]
     if not folders:
@@ -195,13 +187,9 @@ def get_max_folder_name(directory):
 
 
 # --------------------------------------------------------------------
-# ❗ 新增：用于打印耗时分析的辅助函数
-# --------------------------------------------------------------------
 def print_time_breakdown(episode, episode_times):
     """打印本回合的耗时分解结果"""
     total_time = sum(episode_times.values())
-
-    # 防止除零
     if total_time < 1e-6:
         print(f"回合 {episode} 耗时过短，跳过耗时分析。")
         return
@@ -210,7 +198,6 @@ def print_time_breakdown(episode, episode_times):
     print(f"🚀 回合 {episode} 耗时分解 (总耗时: {total_time:.4f} s)")
     print("-" * 45)
 
-    # 打印每个部分的耗时及其占总时间的百分比
     sorted_times = sorted(episode_times.items(), key=lambda item: item[1], reverse=True)
     for name, time_val in sorted_times:
         percentage = (time_val / total_time) * 100
@@ -228,43 +215,48 @@ if __name__ == '__main__':
     # --------------------------------------------------------------------
     TARGET_BASE_DIR = os.path.join(project_root, "nets", "Chap3", execute_date)
     os.makedirs(TARGET_BASE_DIR, exist_ok=True)
-
-    # 自动获取下一个训练ID
     train_id = get_max_folder_name(TARGET_BASE_DIR)
-
-    # 最终的保存路径
     base_path = f"{TARGET_BASE_DIR}/{train_id}"
     os.makedirs(base_path)
 
     # 初始化共享内存和计数器
-    # 内存存储结构: [s, a_fc, a_bat, a_sc, r, s_] (N_STATES * 2 + 4)
     MEMORY_WIDTH = N_STATES * 2 + 4
     shared_memory = np.zeros((MEMORY_CAPACITY, MEMORY_WIDTH))
-    memory_counter = [0]  # 使用列表作为可变引用，以便在类中更新
+    memory_counter = [0]
 
     # 实例化三个独立的 DQN 智能体
     FC_Agent = IndependentDQN("FC_Agent", N_FC_ACTIONS, shared_memory, memory_counter)
     Bat_Agent = IndependentDQN("Bat_Agent", N_BAT_ACTIONS, shared_memory, memory_counter)
     SC_Agent = IndependentDQN("SC_Agent", N_SC_ACTIONS, shared_memory, memory_counter)
 
+    # 将所有智能体放在一个列表中，方便统一操作 (LR 调度和早停)
+    all_agents = [FC_Agent, Bat_Agent, SC_Agent]
+
     print('\nCollecting experience and learning (I-DQN, 3-Agent)...')
     start_time_total = time.time()
-    reward_max = -1e6
-    x, y = [], []
 
+    # ❗ 增加 RL 和 Early Stopping 变量
+    reward_max = -float('inf')
+    reward_not_improve_episodes = 0
+    training_done = False
+
+    x, y = [], []
     if REAL_TIME_DRAW:
         plt.ion()
         fig, ax = plt.subplots()
         line, = ax.plot(x, y)
 
-    # 使用 tqdm 包装主循环，实现实时进度输出
     episode_pbar = tqdm(range(EPISODE), desc=f"RL Training ({remark})")
 
     for i_episode in episode_pbar:
+
+        # ❗ 早停检查，如果满足条件则退出训练循环
+        if training_done:
+            break
+
         s = env.reset()
         ep_r = 0
 
-        # ❗ 初始化本回合的耗时追踪器
         episode_times = {
             'Action_Select': 0.0,
             'Env_Step': 0.0,
@@ -275,26 +267,20 @@ if __name__ == '__main__':
         step_count = 0
 
         while True:
-            # --------------------------------------------------------
-            # 1. 动作选择 (Action Selection)
-            # --------------------------------------------------------
+            # 1. 动作选择
             time_start_action = time.time()
-            a_fc = FC_Agent.choose_action(s)  # FC 局部动作索引 a_fc ∈ {0, ..., 31}
-            a_bat = Bat_Agent.choose_action(s)  # Bat 局部动作索引 a_bat ∈ {0, ..., 19}
-            a_sc = SC_Agent.choose_action(s)  # SC 局部动作索引 a_sc ∈ {0, 1}
+            a_fc = FC_Agent.choose_action(s)
+            a_bat = Bat_Agent.choose_action(s)
+            a_sc = SC_Agent.choose_action(s)
             episode_times['Action_Select'] += (time.time() - time_start_action)
 
-            # --------------------------------------------------------
-            # 2. 环境交互 (Env Step)
-            # --------------------------------------------------------
+            # 2. 环境交互
             action_list = [a_fc, a_bat, a_sc]
             time_start_step = time.time()
             s_, r, done, _ = env.step(action_list)
             episode_times['Env_Step'] += (time.time() - time_start_step)
 
-            # --------------------------------------------------------
-            # 3. 存储转换 (Data Storage)
-            # --------------------------------------------------------
+            # 3. 存储转换
             time_start_store = time.time()
             transition = np.hstack((s, a_fc, a_bat, a_sc, r, s_))
 
@@ -310,12 +296,9 @@ if __name__ == '__main__':
             ep_r += r
             step_count += 1
 
-            # --------------------------------------------------------
-            # 4. I-DQN 独立学习 (DQN Learn)
-            # --------------------------------------------------------
+            # 4. I-DQN 独立学习
             if memory_counter[0] > MEMORY_CAPACITY and memory_counter[0] % LEARN_FREQUENCY == 0:
                 time_start_learn = time.time()
-                # 0 for FC action column, 1 for Bat action column, 2 for SC action column
                 FC_Agent.learn(0)
                 Bat_Agent.learn(1)
                 SC_Agent.learn(2)
@@ -325,14 +308,15 @@ if __name__ == '__main__':
                 writer.add_scalar("Ep_r/Ep", ep_r, i_episode)
                 using_time_total = time.time() - start_time_total
 
-                # 使用 set_postfix 实时更新进度条信息
+                current_lr = FC_Agent.optimizer.param_groups[0]["lr"]  # 获取当前LR
+
+                # 更新进度条信息
                 episode_pbar.set_postfix({
                     'Ep_r': f'{ep_r:.2f}',
+                    'LR': f'{current_lr:.2e}',
                     'Total_Time': f'{using_time_total:.2f}s',
-                    'Env_Step_Time_ms': f"{(episode_times['Env_Step'] / step_count) * 1000:.2f}",
                 })
 
-                # ❗ 打印详细的耗时分解结果（仅在前 5 回合和每 10 回合打印）
                 if i_episode < 2 or (i_episode + 1) % 100 == 0:
                     print_time_breakdown(i_episode + 1, episode_times)
 
@@ -344,54 +328,69 @@ if __name__ == '__main__':
         y.append(float(ep_r))
 
         # --------------------------------------------------------
-        # 保存最优模型
+        # ❗ 模型保存 (最高奖励) / RL / 早停逻辑 (基于回合奖励)
         # --------------------------------------------------------
-        if ep_r > reward_max:
-            reward_max = ep_r
-            net_name_base = (f"{base_path}/bs{BATCH_SIZE}_lr{int(LR * 10000)}_episode_{i_episode + 1}"
-                             f"_pool{POOL_SIZE}_freq{LEARN_FREQUENCY}_MARL_{remark}_MAX_R{int(reward_max)}")
 
-            # 必须保存所有三个智能体模型
+        # 1. 模型保存 (仅保留回合奖励最高的模型)
+        if ep_r > reward_max + REWARD_THRESHOLD:  # 奖励显著提高
+            reward_max = ep_r
+            reward_not_improve_episodes = 0  # 奖励提高，重置计数器
+
+            # 保存所有三个智能体的最高奖励模型
+            net_name_base = (f"{base_path}/bs{BATCH_SIZE}_lr{int(LR * 10000)}_ep_{i_episode + 1}"
+                             f"_pool{POOL_SIZE}_freq{LEARN_FREQUENCY}_MARL_{remark}_MAX_R{int(reward_max)}")
             torch.save(FC_Agent.eval_net.state_dict(), f"{net_name_base}_FC.pth")
             torch.save(Bat_Agent.eval_net.state_dict(), f"{net_name_base}_BAT.pth")
             torch.save(SC_Agent.eval_net.state_dict(), f"{net_name_base}_SC.pth")
-            print(f"\nNew Max Value Models saved: {net_name_base}")  # 加换行防止被 tqdm 覆盖
+            print(f"\n--- New Max Reward: {reward_max:.2f} | Models saved: {net_name_base} ---")
 
             if REAL_TIME_DRAW:
                 ax.plot(i_episode, reward_max, 'ro')
 
-        # 实时绘图
-        if REAL_TIME_DRAW:
-            line.set_xdata(x)
-            line.set_ydata(y)
-            ax.relim()
-            ax.autoscale_view()
-            plt.draw()
-            plt.pause(0.01)
+        # 2. 早停机制 (Early Stopping)
+        elif ep_r <= reward_max + REWARD_THRESHOLD:  # 奖励没有显著提高
+            reward_not_improve_episodes += 1  # ❗ 已修正缩进问题
 
-    # 最终模型保存
-    final_net_name_base = (f"{base_path}/bs{BATCH_SIZE}_lr{int(LR * 10000)}_episode_{EPISODE}_pool{POOL_SIZE}"
-                           f"_freq{LEARN_FREQUENCY}_MARL_{remark}_FINAL")
-    torch.save(FC_Agent.eval_net.state_dict(), f"{final_net_name_base}_FC.pth")
-    torch.save(Bat_Agent.eval_net.state_dict(), f"{final_net_name_base}_BAT.pth")
-    torch.save(SC_Agent.eval_net.state_dict(), f"{final_net_name_base}_SC.pth")
-    print(f"\nFinal models saved: {final_net_name_base}")
+        # 3. RL 学习率调度 (对所有智能体应用)
+        for agent in all_agents:
+            agent.scheduler.step(ep_r)
 
-    writer.flush()
-    writer.close()
+    if reward_not_improve_episodes >= EARLY_STOP_PATIENCE:
+        print(f"\n\n--- Early Stopping Triggered! ---")
+        print(f"Reward has not improved significantly for {EARLY_STOP_PATIENCE} episodes.")
+        training_done = True
 
-    # 绘制并保存曲线
-    if not REAL_TIME_DRAW:
-        fig, ax = plt.subplots()
-        ax.plot(x, y)
-
-    try:
-        plt.get_current_fig_manager().window.showMaximized()
-    except Exception:
-        pass
-
-    plt.savefig(f"{base_path}/train_curve_MARL_IQL_bs{BATCH_SIZE}_lr{int(LR * 10000)}_ep{EPISODE}.svg")
+        # --------------------------------------------------------------------
 
     if REAL_TIME_DRAW:
-        plt.ioff()
-    plt.show()
+        line.set_xdata(x)
+        line.set_ydata(y)
+        ax.relim()
+        ax.autoscale_view()
+        plt.draw()
+        plt.pause(0.01)
+
+# 最终模型保存 (在训练循环结束后)
+final_episode = i_episode + 1 if not training_done else i_episode  # 记录实际训练的回合数
+final_net_name_base = (f"{base_path}/final_bs{BATCH_SIZE}_lr{int(LR * 10000)}_ep_{final_episode}_pool{POOL_SIZE}"
+                       f"_freq{LEARN_FREQUENCY}_MARL_{remark}_FINAL")
+
+torch.save(FC_Agent.eval_net.state_dict(), f"{final_net_name_base}_FC.pth")
+torch.save(Bat_Agent.eval_net.state_dict(), f"{final_net_name_base}_BAT.pth")
+torch.save(SC_Agent.eval_net.state_dict(), f"{final_net_name_base}_SC.pth")
+print(f"\nFinal models saved: {final_net_name_base}")
+
+writer.flush()
+writer.close()
+
+# 绘制并保存曲线
+if not REAL_TIME_DRAW:
+    fig, ax = plt.subplots()
+    ax.plot(x, y)
+
+# 绘制并保存曲线
+plt.savefig(f"{base_path}/train_curve_MARL_IQL_bs{BATCH_SIZE}_lr{int(LR * 10000)}_ep{final_episode}.svg")
+
+if REAL_TIME_DRAW:
+    plt.ioff()
+plt.show()

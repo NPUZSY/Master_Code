@@ -28,11 +28,11 @@ class Envs(gym.Env):
         self.Q_H2_eq = 142000.0  # J/g 等效换算（142 MJ/kg -> 142000 J/g）
 
         # Fuel cell / battery / supercap limits (可按需修改)
-        self.P_FC_MAX = 30000.0  # W
+        self.P_FC_MAX = 5000.0  # W
         self.P_FC_MIN = 0.0
 
         # Battery max charge/discharge power (绝对值)
-        self.P_BAT_MAX = 3000.0  # W  (根据你电池模型调整)
+        self.P_BAT_MAX = 5000.0  # W  (根据你电池模型调整)
         # Supercap max instantaneous power (吸放)
         self.P_SC_MAX = 2000.0  # W
 
