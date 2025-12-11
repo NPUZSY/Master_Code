@@ -323,8 +323,11 @@ class Envs(gym.Env):
         # 匹配误差
         # ----------------------------
         # 计算供需差值（应接近于 0）
-        power_mismatch = P_load - P_fc - actual_bat_power - actual_p_sc
-        r_match = abs(power_mismatch)
+        # power_mismatch = P_load - P_fc - actual_bat_power - actual_p_sc
+        # r_match = abs(power_mismatch)
+
+        # 与论文对应，超级电容功率就是不匹配功率
+        r_match = abs(actual_p_sc)
 
         # ----------------------------
         # 总奖励

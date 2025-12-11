@@ -26,8 +26,8 @@ if __name__ == '__main__':
 
     # 模型路径配置
     net_data = '1210'
-    train_id = '5'
-    net_name_base = 'bs64_lr10_ep_470_pool10_freq10_MARL_MARL_IQL_32x20x2_MAX_R-43'
+    train_id = '12'
+    net_name_base = 'bs32_lr20_ep_105_pool10_freq10_MARL_MARL_IQL_32x20x2_MAX_R-3502'
 
     # 初始化智能体
     FC_Agent = IndependentDQN("FC_Agent", N_STATES, N_FC_ACTIONS)
