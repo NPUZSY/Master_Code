@@ -31,8 +31,8 @@ if __name__ == '__main__':
 
     # 模型路径配置（使用项目根路径拼接，支持任意路径执行）
     net_data = '1213'          # 日期文件夹
-    train_id = '3'             # 训练ID
-    net_name_base = 'bs64_lr10_ep_173_pool100_freq10_MARL_MARL_IQL_32x20x2_MAX_R-57'
+    train_id = '6'             # 训练ID
+    net_name_base = 'bs64_lr1_ep_79_pool50_freq50_MARL_MARL_IQL_32x20x2_MAX_R-18'
 
     # 初始化智能体（与训练代码参数保持一致）
     FC_Agent = IndependentDQN("FC_Agent", N_STATES, N_FC_ACTIONS)

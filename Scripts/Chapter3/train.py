@@ -24,21 +24,30 @@ env = Envs()
 writer = SummaryWriter()
 torch.set_default_dtype(torch.float32)
 
+# ====================== 新增：继续训练相关超参数 ======================
+# 是否继续训练（True=读取预训练模型，False=从头训练）
+RESUME_TRAINING = True
+# 预训练模型路径配置（需根据实际情况修改）
+PRETRAIN_DATE = "1213"          # 预训练模型的日期文件夹
+PRETRAIN_TRAIN_ID = "6"         # 预训练模型的train_id
+PRETRAIN_MODEL_PREFIX = "bs64_lr1_ep_79_pool50_freq50_MARL_MARL_IQL_32x20x2_MAX_R-18"  # 预训练模型前缀
+# =====================================================================
+
 # 超参数
 BATCH_SIZE = 64
-LR = 0.001
+LR = 1e-4
 EPSILON = 0.9
-GAMMA = 0.9
+GAMMA = 0.95
 TARGET_REPLACE_ITER = 100
-POOL_SIZE = 100
+POOL_SIZE = 50
 EPISODE = 2000
-LEARN_FREQUENCY = 10
+LEARN_FREQUENCY = 50
 REAL_TIME_DRAW = False
 
 # 学习率调度与早停参数
 LR_PATIENCE = 50
 LR_FACTOR = 0.5
-EARLY_STOP_PATIENCE = 500
+EARLY_STOP_PATIENCE = 1000
 REWARD_THRESHOLD = 0.001
 
 # 环境参数
@@ -54,7 +63,15 @@ current_timestamp = time.time()
 local_time = time.localtime(current_timestamp)
 execute_date = time.strftime("%m%d", local_time)
 execute_time = time.strftime("%H%M%S", local_time)  # 新增：记录具体时间
-remark = "MARL_IQL_32x20x2"
+
+# ====================== 修改：remark包含基础模型信息 ======================
+if RESUME_TRAINING:
+    # 继续训练时，remark标记基础模型信息
+    remark = f"RESUME_{PRETRAIN_MODEL_PREFIX}_MARL_IQL_32x20x2"
+else:
+    # 从头训练时使用原有remark
+    remark = "MARL_IQL_32x20x2"
+# =====================================================================
 
 # 新增：全局变量存储最优模型文件名
 best_model_base_name = ""
@@ -82,7 +99,13 @@ def save_hyperparameters(save_path, final_metrics=None):
             "device": str(device),
             "total_training_time_s": round(time.time() - start_time_total, 2) if 'start_time_total' in globals() else 0,
             "best_model_base_name": best_model_base_name,  # 新增：最优模型文件名前缀
-            "best_model_full_path": os.path.join(save_path, best_model_base_name) if best_model_base_name else ""  # 新增：最优模型完整路径
+            "best_model_full_path": os.path.join(save_path, best_model_base_name) if best_model_base_name else "",  # 新增：最优模型完整路径
+            "resume_training": RESUME_TRAINING,  # 新增：是否继续训练
+            "pretrain_model_info": {  # 新增：预训练模型信息
+                "pretrain_date": PRETRAIN_DATE if RESUME_TRAINING else "",
+                "pretrain_train_id": PRETRAIN_TRAIN_ID if RESUME_TRAINING else "",
+                "pretrain_model_prefix": PRETRAIN_MODEL_PREFIX if RESUME_TRAINING else ""
+            }
         },
         # 核心超参数
         "core_hyperparams": {
@@ -134,8 +157,8 @@ def save_hyperparameters(save_path, final_metrics=None):
             f.write(f"【{section.upper()}】\n")
             f.write("-" * 60 + "\n")
             for key, value in params.items():
-                # 对最优模型名称单独高亮显示
-                if key in ["best_model_base_name", "best_model_full_path"]:
+                # 对关键信息高亮显示
+                if key in ["best_model_base_name", "best_model_full_path", "resume_training", "pretrain_model_prefix"]:
                     f.write(f"{key:<30}: \033[1;32m{value}\033[0m\n")  # 绿色高亮
                 else:
                     f.write(f"{key:<30}: {value}\n")
@@ -164,6 +187,37 @@ def print_time_breakdown(episode, episode_times):
         print(f"| {name.ljust(15)} | {time_val:9.4f} s | {percentage:6.2f} % |")
     print("=" * 45)
 
+# ====================== 新增：加载预训练模型函数 ======================
+def load_pretrained_models(agents, pretrain_date, pretrain_train_id, model_prefix):
+    """
+    加载预训练模型到智能体
+    :param agents: 智能体列表 [FC_Agent, Bat_Agent, SC_Agent]
+    :param pretrain_date: 预训练模型的日期文件夹
+    :param pretrain_train_id: 预训练模型的train_id
+    :param model_prefix: 预训练模型前缀
+    """
+    pretrain_base_dir = os.path.join(project_root, "nets", "Chap3", pretrain_date, pretrain_train_id)
+    model_paths = {
+        "FC_Agent": os.path.join(pretrain_base_dir, f"{model_prefix}_FC.pth"),
+        "Bat_Agent": os.path.join(pretrain_base_dir, f"{model_prefix}_BAT.pth"),
+        "SC_Agent": os.path.join(pretrain_base_dir, f"{model_prefix}_SC.pth")
+    }
+
+    for agent in agents:
+        model_path = model_paths[agent.agent_name]
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"预训练模型文件不存在: {model_path}")
+        
+        try:
+            agent.eval_net.load_state_dict(torch.load(model_path, map_location=device))
+            agent.target_net.load_state_dict(agent.eval_net.state_dict())
+            print(f"✅ 成功加载{agent.agent_name}预训练模型: {model_path}")
+        except Exception as e:
+            raise RuntimeError(f"加载{agent.agent_name}模型失败: {e}")
+
+    print("\n🎉 所有预训练模型加载完成！")
+# =====================================================================
+
 if __name__ == '__main__':
     # 路径设置
     TARGET_BASE_DIR = os.path.join(project_root, "nets", "Chap3", execute_date)
@@ -191,6 +245,12 @@ if __name__ == '__main__':
         shared_memory, memory_counter
     )
     all_agents = [FC_Agent, Bat_Agent, SC_Agent]
+
+    # ====================== 新增：加载预训练模型 ======================
+    if RESUME_TRAINING:
+        print("\n📌 开始加载预训练模型...")
+        load_pretrained_models(all_agents, PRETRAIN_DATE, PRETRAIN_TRAIN_ID, PRETRAIN_MODEL_PREFIX)
+    # =====================================================================
 
     # 设置优化器
     for agent in all_agents:
