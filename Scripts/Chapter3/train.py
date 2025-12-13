@@ -319,7 +319,7 @@ if __name__ == '__main__':
         fig, ax = plt.subplots()
         line, = ax.plot(x, y)
 
-    episode_pbar = tqdm(range(EPISODE), desc=f"RL Training ({remark})")
+    episode_pbar = tqdm(range(EPISODE), desc=f"RL Training")
     for i_episode in episode_pbar:
         if training_done:
             break

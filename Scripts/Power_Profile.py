@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import numpy as np
 from scipy.signal import savgol_filter
-from Scripts.utils.global_utils import *
+from utils.global_utils import *
 # 获取字体（优先宋体+Times New Roman，解决中文/负号显示）
 font_get()
 
@@ -15,7 +15,7 @@ POWER_NOISE_STD = 80.0  # W
 DEFAULT_TEMP_SAVGOL_WINDOW = 101
 DEFAULT_TEMP_SAVGOL_POLY = 3
 
-DEFAULT_POWER_SAVGOL_WINDOW = 101
+DEFAULT_POWER_SAVGOL_WINDOW = 11
 DEFAULT_POWER_SAVGOL_POLY = 5
 
 
@@ -63,14 +63,14 @@ def _build_base_profiles():
     # 第四阶段温度修改：以20℃为中心，600-750秒从5℃上升到20℃，750-800秒保持20℃
     reflight_time = np.linspace(600, 800, 200)
     # 计算750秒对应的索引：600-800共200个点，750秒是第150个点（600+150=750）
-    reflight_temperature1 = np.linspace(5, 20, 150)  # 600-750秒：5→20℃
-    reflight_temperature2 = np.linspace(20, 20, 50)   # 750-800秒：保持20℃
+    reflight_temperature1 = np.linspace(5, 20, 50)  # 600-750秒：5→20℃
+    reflight_temperature2 = np.linspace(20, 20, 150)   # 750-800秒：保持20℃
     reflight_temperature = np.concatenate((reflight_temperature1, reflight_temperature2))
 
     # 功率保持原有逻辑：650秒达5000W峰值，700秒下降到2000W，700-800秒保持2000W
-    reflight_power1 = np.linspace(2000, 5000, 50)    # 600-650秒：上升至峰值
-    reflight_power2 = np.linspace(5000, 2000, 50)    # 650-700秒：快速下降至2000W
-    reflight_power3 = np.full(100, 2000)             # 700-800秒：稳定在2000W
+    reflight_power1 = np.linspace(2000, 5000, 5)    # 600-650秒：上升至峰值
+    reflight_power2 = np.linspace(5000, 2000, 45)    # 650-700秒：快速下降至2000W
+    reflight_power3 = np.full(150, 2000)             # 700-800秒：稳定在2000W
     reflight_power = np.concatenate((reflight_power1, reflight_power2, reflight_power3))
 
     # 合并所有阶段数据
