@@ -5,44 +5,62 @@ import numpy as np
 import matplotlib.patches as mpatches
 import os
 
-# 导入公共模块
+# 导入公共模块（与训练代码保持一致的导入形式）
 from MARL_Engine import setup_project_root, device, IndependentDQN, font_get
 project_root = setup_project_root()
 from Scripts.Env import Envs
 
-# 获取新罗马
+# 获取新罗马字体
 font_get()
 
-# 环境参数
-N_STATES = 7  # [load, temp, P_fc, P_bat, P_sc, SOC_b, SOC_sc]
+# 全局设置
+torch.manual_seed(0)
+
+# 环境参数（从环境实例中动态获取，而非硬编码）
 N_FC_ACTIONS = 32
 N_BAT_ACTIONS = 20
 N_SC_ACTIONS = 2
-torch.manual_seed(0)
 
 if __name__ == '__main__':
     # 初始化环境
     env = Envs()
+    
+    # 动态获取状态维度（与训练代码保持一致）
+    N_STATES = env.observation_space.shape[0]
+    print(f"自动识别环境状态维度: N_STATES = {N_STATES}")
 
-    # 模型路径配置
-    net_data = '1210'
-    train_id = '12'
-    net_name_base = 'bs32_lr20_ep_105_pool10_freq10_MARL_MARL_IQL_32x20x2_MAX_R-3502'
+    # 模型路径配置（使用项目根路径拼接，支持任意路径执行）
+    net_data = '1213'          # 日期文件夹
+    train_id = '0'             # 训练ID
+    net_name_base = 'bs32_lr20_ep_1_pool100_freq10_MARL_MARL_IQL_32x20x2_MAX_R-816'
 
-    # 初始化智能体
+    # 初始化智能体（与训练代码参数保持一致）
     FC_Agent = IndependentDQN("FC_Agent", N_STATES, N_FC_ACTIONS)
     Bat_Agent = IndependentDQN("Bat_Agent", N_STATES, N_BAT_ACTIONS)
     SC_Agent = IndependentDQN("SC_Agent", N_STATES, N_SC_ACTIONS)
 
-    # 加载模型
-    BASE_PATH = f"../../nets/Chap3/{net_data}/{train_id}/{net_name_base}"
+    # 构建模型路径（基于项目根路径，支持任意工作目录执行）
+    MODEL_BASE_DIR = os.path.join(project_root, "nets", "Chap3", net_data, train_id)
+    MODEL_FILE_PREFIX = os.path.join(MODEL_BASE_DIR, net_name_base)
+    
+    # 加载模型（增加路径合法性检查）
     try:
-        FC_Agent.load_net(f"{BASE_PATH}_FC.pth")
-        Bat_Agent.load_net(f"{BASE_PATH}_BAT.pth")
-        SC_Agent.load_net(f"{BASE_PATH}_SC.pth")
-        print(f"Successfully loaded MARL models from: {BASE_PATH}_*.pth")
-    except FileNotFoundError:
-        print(f"Error: Model files not found in {BASE_PATH}_*.pth")
+        # 确保模型目录存在
+        os.makedirs(MODEL_BASE_DIR, exist_ok=True)
+        
+        # 加载各智能体模型
+        FC_Agent.load_net(f"{MODEL_FILE_PREFIX}_FC.pth")
+        Bat_Agent.load_net(f"{MODEL_FILE_PREFIX}_BAT.pth")
+        SC_Agent.load_net(f"{MODEL_FILE_PREFIX}_SC.pth")
+        
+        print(f"✅ 成功加载MARL模型:")
+        print(f"   模型路径: {MODEL_FILE_PREFIX}_*.pth")
+    except FileNotFoundError as e:
+        print(f"❌ 模型文件未找到: {e}")
+        print(f"   期望路径: {MODEL_FILE_PREFIX}_*.pth")
+        raise
+    except Exception as e:
+        print(f"❌ 模型加载失败: {e}")
         raise
 
     # 测试初始化
@@ -76,7 +94,7 @@ if __name__ == '__main__':
     time_start = time.time()
 
     # 测试主循环
-    # 测试主循环
+    print("\n🚀 开始测试...")
     while True:
         t0_loop = time.time()
 
@@ -86,14 +104,14 @@ if __name__ == '__main__':
         a_bat = Bat_Agent.choose_action(s, train=False)
         a_sc = SC_Agent.choose_action(s, train=False)
         action_list = [a_fc, a_bat, a_sc]
-        action_time = time.time() - t_as0  # 当前步动作选择耗时
+        action_time = time.time() - t_as0
 
         # 环境交互
         t_env0 = time.time()
         s_, r, done, info = env.step(action_list)
-        env_time = time.time() - t_env0    # 当前步环境交互耗时
+        env_time = time.time() - t_env0
 
-        # 统计数据
+        # 统计数据收集
         total_fc_H2_g += float(info.get("C_fc_g", 0.0))
         total_bat_H2_g += float(info.get("C_bat_g", 0.0))
         times.append(step)
@@ -116,7 +134,7 @@ if __name__ == '__main__':
 
         ep_r += r
         t_log0 = time.time()
-        log_time = time.time() - t_log0  # 当前步日志处理耗时
+        log_time = time.time() - t_log0
 
         # 累加各阶段总耗时
         episode_times['Action_Select'] += action_time
@@ -146,7 +164,7 @@ if __name__ == '__main__':
     sc_inactive_steps = sum(1 for p in power_sc if abs(p) < sc_inactive_threshold)
     sc_inactive_ratio = sc_inactive_steps / total_steps if total_steps > 0 else 0.0
 
-    # 绘图配置
+    # 绘图配置（与训练代码保持一致的字体设置）
     plt.rcParams['font.family'] = 'Times New Roman'
     best_color = ['#3570a8', '#f09639', '#42985e', '#c84343', '#8a7ab5']
     article_color = ['#f09639', '#c84343', '#42985e', '#8a7ab5', '#3570a8']
@@ -187,27 +205,43 @@ if __name__ == '__main__':
     ax1.axvspan(450, 600, alpha=0.2, color='salmon')
     ax1.grid(linestyle='--', linewidth=0.5, alpha=0.5)
 
-    # 保存图像
-    save_dir = f"../../nets/Chap3/{net_data}/{train_id}"
-    os.makedirs(save_dir, exist_ok=True)
-    plt.savefig(f"{save_dir}/{net_name_base}_Test_Result.svg")
-    plt.savefig(f"{save_dir}/{net_name_base}_Test_Result.png", dpi=1200)
+    # 保存图像（使用项目根路径，确保保存路径正确）
+    save_path_svg = os.path.join(MODEL_BASE_DIR, f"{net_name_base}_Test_Result.svg")
+    save_path_png = os.path.join(MODEL_BASE_DIR, f"{net_name_base}_Test_Result.png")
+    
+    plt.savefig(save_path_svg, bbox_inches='tight', dpi=1200)
+    plt.savefig(save_path_png, dpi=1200, bbox_inches='tight')
+    
+    print(f"\n📊 测试结果图已保存:")
+    print(f"   SVG: {save_path_svg}")
+    print(f"   PNG: {save_path_png}")
 
-    # 打印结果汇总
-    print("\n===================== 测试结果汇总与分析 =====================")
+    # 打印详细结果汇总
+    print("\n" + "="*60)
+    print("📈 测试结果汇总与分析")
+    print("="*60)
     print(f"【等效氢耗】")
-    print(f"系统总等效氢耗：{total_h2:.6f} g")
-    print(f"  ├─ 燃料电池氢耗：{total_fc_H2_g:.6f} g，占比 {fc_h2_ratio*100:.2f}%")
-    print(f"  └─ 电池等效氢耗：{total_bat_H2_g:.6f} g，占比 {bat_h2_ratio*100:.2f}%")
+    print(f"  系统总等效氢耗：{total_h2:.6f} g")
+    print(f"  ├─ 燃料电池氢耗：{total_fc_H2_g:.6f} g（{fc_h2_ratio*100:.2f}%）")
+    print(f"  └─ 电池等效氢耗：{total_bat_H2_g:.6f} g（{bat_h2_ratio*100:.2f}%）")
     print(f"\n【电池 SOC 情况】")
-    print(f"电池 SOC 范围：{min(soc_bat):.6f} - {max(soc_bat):.6f}，变化幅度：{soc_bat_range:.6f}")
+    print(f"  电池 SOC 范围：{min(soc_bat):.6f} ~ {max(soc_bat):.6f}")
+    print(f"  电池 SOC 变化幅度：{soc_bat_range:.6f}")
     print(f"\n【电池充电特性】")
-    print(f"充电时间：{bat_charge_steps*dt:.2f}s，占比 {bat_charge_ratio*100:.2f}%")
+    print(f"  充电步数：{bat_charge_steps} 步（{bat_charge_steps*dt:.2f}s）")
+    print(f"  充电占比：{bat_charge_ratio*100:.2f}%")
     print(f"\n【超级电容特性】")
-    print(f"释放能量：{sc_release_Wh:.6f} Wh，吸收能量：{sc_absorb_Wh:.6f} Wh")
-    print(f"未参与比例：{sc_inactive_ratio*100:.2f}%")
+    print(f"  释放能量：{sc_release_Wh:.6f} Wh")
+    print(f"  吸收能量：{sc_absorb_Wh:.6f} Wh")
+    print(f"  未参与比例：{sc_inactive_ratio*100:.2f}%")
     print(f"\n【性能指标】")
-    print(f"累积奖励：{ep_r:.2f}，总耗时：{total_time:.4f}s")
-    print("==============================================================")
+    print(f"  累积奖励：{ep_r:.2f}")
+    print(f"  总测试步数：{total_steps} 步")
+    print(f"  总耗时：{total_time:.4f}s")
+    print(f"  平均步耗时：{total_time/total_steps:.6f}s/步")
+    print("="*60)
 
+    # 可选：显示图像
     # plt.show()
+    
+    print(f"\n✅ 测试完成！所有结果已保存至：{MODEL_BASE_DIR}")
