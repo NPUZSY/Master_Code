@@ -32,14 +32,14 @@ def parse_args():
                         help='是否基于已有模型继续训练（默认：从头训练）')
     parser.add_argument('--pretrain-date', type=str, default="1213",
                         help='预训练模型的日期文件夹（仅resume-training=True时生效）')
-    parser.add_argument('--pretrain-train-id', type=str, default="6",
+    parser.add_argument('--pretrain-train-id', type=str, default="25",
                         help='预训练模型的train_id（仅resume-training=True时生效）')
     parser.add_argument('--pretrain-model-prefix', type=str, 
-                        default="bs64_lr1_ep_79_pool50_freq50_MARL_MARL_IQL_32x20x2_MAX_R-18",
+                        default="bs64_lr1_ep_373_pool100_freq50_MARL_FROM_SCRATCH_bs64_lr1_MARL_IQL_32x20x2_MAX_R-17",
                         help='预训练模型前缀（仅resume-training=True时生效）')
     
     # 训练超参数（可选，支持命令行覆盖默认值）
-    parser.add_argument('--batch-size', type=int, default=64, help='批大小（默认：64）')
+    parser.add_argument('--batch-size', type=int, default=32, help='批大小（默认：32）')
     parser.add_argument('--lr', type=float, default=1e-4, help='学习率（默认：1e-4）')
     parser.add_argument('--epsilon', type=float, default=0.9, help='探索率（默认：0.9）')
     parser.add_argument('--gamma', type=float, default=0.9, help='折扣因子（默认：0.95）')
@@ -381,7 +381,7 @@ if __name__ == '__main__':
                     'Total_Time': f'{using_time_total:.2f}s',
                 })
 
-                if i_episode < 2 or (i_episode + 1) % 100 == 0:
+                if i_episode < 2 or (i_episode + 1) % 500 == 0:
                     print_time_breakdown(i_episode + 1, episode_times)
                 break
 
@@ -400,7 +400,7 @@ if __name__ == '__main__':
             torch.save(FC_Agent.eval_net.state_dict(), f"{base_path}/{net_name_base}_FC.pth")
             torch.save(Bat_Agent.eval_net.state_dict(), f"{base_path}/{net_name_base}_BAT.pth")
             torch.save(SC_Agent.eval_net.state_dict(), f"{base_path}/{net_name_base}_SC.pth")
-            print(f"\n--- New Max Reward: {reward_max:.2f} | Models saved: {net_name_base} ---")
+            print(f"\n--- New Max Reward: {reward_max:.2f} ---")
         else:
             reward_not_improve_episodes += 1
 
