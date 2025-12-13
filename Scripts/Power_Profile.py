@@ -4,8 +4,51 @@ import matplotlib.patches as mpatches
 import numpy as np
 from scipy.signal import savgol_filter
 
-plt.rcParams['font.family'] = ('Times New Roman')
-plt.rcParams['font.size'] = 12
+def font_get():
+    """
+    加载Times New Roman和宋体(SimSun)字体，自动适配中英文显示
+    - 英文：Times New Roman
+    - 中文：SimSun（宋体）
+    """
+    import os
+    import matplotlib.font_manager as fm
+    import matplotlib.pyplot as plt
+
+    # 定义字体路径
+    tnr_font_path = '/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman.ttf'
+    simsun_font_path = '/usr/share/fonts/truetype/simsun.ttc'
+
+    # 加载字体文件
+    font_paths = []
+    if os.path.exists(tnr_font_path):
+        fm.fontManager.addfont(tnr_font_path)
+        font_paths.append(tnr_font_path)
+        print(f"成功加载Times New Roman: {tnr_font_path}")
+    if os.path.exists(simsun_font_path):
+        fm.fontManager.addfont(simsun_font_path)
+        font_paths.append(simsun_font_path)
+        print(f"成功加载宋体(SimSun): {simsun_font_path}")
+
+    # 关键配置：优先宋体（支持中文），后备Times New Roman（支持英文）
+    plt.rcParams.update({
+        'font.family': ['SimSun', 'Times New Roman'],  # 宋体在前，优先渲染中文
+        'font.sans-serif': ['SimSun', 'Times New Roman'],
+        'axes.unicode_minus': False,  # 解决负号显示问题
+        'font.size': 12
+    })
+
+    # 验证加载
+    try:
+        simsun_fp = fm.FontProperties(family='SimSun')
+        tnr_fp = fm.FontProperties(family='Times New Roman')
+        print(f"\n字体验证：")
+        print(f"- 宋体路径: {fm.findfont(simsun_fp)}")
+        print(f"- Times New Roman路径: {fm.findfont(tnr_fp)}")
+    except Exception as e:
+        print(f"字体验证失败: {e}")
+
+# 调用字体加载函数
+font_get()
 
 # 默认噪声参数与滤波参数（可在函数调用时覆盖）
 TEMPERATURE_NOISE_STD = 3.0  # ℃
@@ -22,20 +65,24 @@ DEFAULT_POWER_SAVGOL_POLY = 5
 def _build_base_profiles():
     """
     构建基础（无噪声）时间序列、温度与功率剖面。
+    新增600-800秒再出水飞行阶段，参考起飞阶段特征
     返回：time, temperature, power （np.ndarray）
     """
-    # 起飞阶段 (0 - 200)
+    # 起飞阶段 (0 - 200) - 温度以-15℃为中心，功率2000W基准
     takeoff_time = np.linspace(0, 200, 200)
-    takeoff_temperature1 = np.linspace(-75, -75, 150)
-    takeoff_temperature2 = np.linspace(-75, 25, 50)
+    # 第一阶段温度修改：前150秒保持-15℃，后50秒上升到25℃（以-15为中心）
+    takeoff_temperature1 = np.linspace(-15, -15, 150)
+    takeoff_temperature2 = np.linspace(-15, 25, 50)
     takeoff_temperature = np.concatenate((takeoff_temperature1, takeoff_temperature2))
 
-    # 起飞功率
+    # 起飞功率 - 保持2000W基准
     takeoff_time1 = np.linspace(0, 150, 150)
     takeoff_time2 = np.linspace(150, 170, 20)
     takeoff_time3 = np.linspace(170, 200, 30)
     takeoff_power = np.concatenate(
-        (takeoff_time1 * 0 + 4000, takeoff_time2 * 40 - 2000, (takeoff_time3 - 170) * (-120) + 4600)
+        (takeoff_time1 * 0 + 2000,  # 基准功率改为2000W
+         takeoff_time2 * 20 - 1000,  # 调整系数使功率合理上升（峰值约3000W）
+         (takeoff_time3 - 170) * (-60) + 3000)  # 功率下降段
     )
 
     # 巡航阶段 (200 - 400)
@@ -55,12 +102,26 @@ def _build_base_profiles():
         ((landing_time1 - 400) * 30 + 1000, landing_time2 * 0 + 2500)
     )
 
-    time = np.concatenate((takeoff_time, cruise_time, landing_time))
-    temperature = np.concatenate((takeoff_temperature, cruise_temperature, landing_temperature))
-    power = np.concatenate((takeoff_power, cruise_power, landing_power))
+    # 新增：再出水飞行阶段 (600 - 800)
+    # 第四阶段温度修改：以20℃为中心，600-750秒从5℃上升到20℃，750-800秒保持20℃
+    reflight_time = np.linspace(600, 800, 200)
+    # 计算750秒对应的索引：600-800共200个点，750秒是第150个点（600+150=750）
+    reflight_temperature1 = np.linspace(5, 20, 150)  # 600-750秒：5→20℃
+    reflight_temperature2 = np.linspace(20, 20, 50)   # 750-800秒：保持20℃
+    reflight_temperature = np.concatenate((reflight_temperature1, reflight_temperature2))
+
+    # 功率保持原有逻辑：650秒达5000W峰值，700秒下降到2000W，700-800秒保持2000W
+    reflight_power1 = np.linspace(2000, 5000, 50)    # 600-650秒：上升至峰值
+    reflight_power2 = np.linspace(5000, 2000, 50)    # 650-700秒：快速下降至2000W
+    reflight_power3 = np.full(100, 2000)             # 700-800秒：稳定在2000W
+    reflight_power = np.concatenate((reflight_power1, reflight_power2, reflight_power3))
+
+    # 合并所有阶段数据
+    time = np.concatenate((takeoff_time, cruise_time, landing_time, reflight_time))
+    temperature = np.concatenate((takeoff_temperature, cruise_temperature, landing_temperature, reflight_temperature))
+    power = np.concatenate((takeoff_power, cruise_power, landing_power, reflight_power))
 
     return time, temperature, power
-
 
 def generate_loads(seed: int | None = None,
                    temp_noise_std: float = TEMPERATURE_NOISE_STD,
@@ -72,14 +133,7 @@ def generate_loads(seed: int | None = None,
     """
     生成带噪声且经滤波的温度与功率需求序列（np.ndarray）。
     返回 (temperature_with_noise, power_with_noise, time)
-
-    参数:
-        seed: 随机种子（None 则不设置，便于外部随机）
-        temp_noise_std: 温度噪声标准差 (℃)
-        power_noise_std: 功率噪声标准差 (W)
-        *_savgol_*: savgol_filter 的窗口与多项式阶数（window 必须为奇数）
     """
-    # 构建基础剖面
     time, temperature_base, power_base = _build_base_profiles()
 
     # 随机种子设置（非 None 时确定性）
@@ -97,27 +151,22 @@ def generate_loads(seed: int | None = None,
     temp_win = _ensure_odd_window(temp_savgol_window, len(temperature_base))
     power_win = _ensure_odd_window(power_savgol_window, len(power_base))
 
-    # 1) 对温度数据进行 savgol 滤波（去趋势）
+    # 温度滤波+加噪声
     try:
         filtered_temperature = savgol_filter(temperature_base, temp_win, temp_savgol_poly)
     except Exception:
         filtered_temperature = temperature_base.copy()
-
-    # 2) 添加高斯噪声
     noise_temperature = rnd.normal(0.0, temp_noise_std, size=filtered_temperature.shape)
     temperature_with_noise = filtered_temperature + noise_temperature
 
-    # 3) 对功率数据滤波
+    # 功率滤波+加噪声
     try:
         filtered_power = savgol_filter(power_base, power_win, power_savgol_poly)
     except Exception:
         filtered_power = power_base.copy()
-
-    # 4) 添加高斯噪声
     noise_power = rnd.normal(0.0, power_noise_std, size=filtered_power.shape)
     power_with_noise = filtered_power + noise_power
 
-    # 确保返回为 np.ndarray（float 类型）
     return np.asarray(temperature_with_noise, dtype=np.float32), np.asarray(power_with_noise, dtype=np.float32), np.asarray(time, dtype=np.float32)
 
 
@@ -127,35 +176,32 @@ def plot_base_curve(time: np.ndarray,
                     save_path: str | None = "../Figures/Power_Temperature.svg",
                     show: bool = True):
     """
-    绘制温度-功率曲线，风格与原脚本保持一致。
-
-    参数:
-        time, temperature, power: np.ndarray
-        save_path: 若不为 None，则保存为该文件
-        show: 是否调用 plt.show()
+    绘制温度-功率曲线，新增再出水飞行阶段的可视化
     """
-    fig, ax_temp = plt.subplots(figsize=(8, 6), dpi=100)
+    fig, ax_temp = plt.subplots(figsize=(10, 6), dpi=100)
 
     # 温度曲线
-    ax_temp.set_xlabel('时间 (s)')
-    ax_temp.set_ylabel('环境温度 (°C)', color='#1f77b4')
+    ax_temp.set_xlabel('时间 (s)', fontsize=12)
+    ax_temp.set_ylabel('环境温度 (°C)', color='#1f77b4', fontsize=12)
     temperature_line, = ax_temp.plot(time, temperature, color='#1f77b4', label='环境温度')
     ax_temp.tick_params(axis='y', labelcolor='#1f77b4')
 
-    # 设置 x/y 范围
-    ax_temp.set_xlim(0, 600)
-    ax_temp.set_ylim(-100, 40)
+    # 温度轴范围修改：-25~40℃
+    ax_temp.set_xlim(0, 800)
+    ax_temp.set_ylim(-25, 40)
 
     # 功率曲线（用第二个 y 轴）
     ax_power = ax_temp.twinx()
-    ax_power.set_ylabel('功率需求 (W)', color='#ff7f0e')
+    ax_power.set_ylabel('功率需求 (W)', color='#ff7f0e', fontsize=12)
     power_line, = ax_power.plot(time, power, color='#ff7f0e', label='功率需求', linestyle='--')
     ax_power.tick_params(axis='y', labelcolor='#ff7f0e')
+    ax_power.set_ylim(0, 5500)
 
     # 阶段背景
     ax_temp.axvspan(0, 200, alpha=0.2, color='lightblue', label='飞行阶段')
     ax_temp.axvspan(200, 400, alpha=0.2, color='lightgreen', label='水面滑行')
     ax_temp.axvspan(400, 600, alpha=0.2, color='salmon', label='水下潜航')
+    ax_temp.axvspan(600, 800, alpha=0.2, color='mediumpurple', label='再出水飞行')
 
     # 巡航阶段透明框（视觉辅助）
     rect_temperature = mpatches.Rectangle((200, 15), 200, 20,
@@ -173,33 +219,35 @@ def plot_base_curve(time: np.ndarray,
     # 网格与图例
     ax_temp.grid(which='both', axis='both', linestyle='--', linewidth=0.5, alpha=0.5)
 
-    taking_off_patch = mpatches.Patch(color='lightblue', label='飞行阶段', alpha=0.2)
+    # 阶段图例
+    taking_off_patch = mpatches.Patch(color='lightblue', label='高空飞行', alpha=0.2)
     cruising_patch = mpatches.Patch(color='lightgreen', label='水面滑行', alpha=0.2)
     landing_patch = mpatches.Patch(color='salmon', label='水下潜航', alpha=0.2)
+    reflight_patch = mpatches.Patch(color='mediumpurple', label='出水飞行', alpha=0.2)
 
-    # 将两条曲线与阶段图例合并显示
-    ax_temp.legend(handles=[power_line, temperature_line, taking_off_patch, cruising_patch, landing_patch],
-                   fontsize=14, loc="lower right",
+    ax_temp.legend(handles=[power_line, temperature_line, taking_off_patch, cruising_patch, 
+                           landing_patch, reflight_patch],
+                   fontsize=12, loc="lower right",
                    frameon=True, framealpha=0.8, edgecolor='black', facecolor='white')
 
-    # 注释与箭头（保留原有风格）
+    # 注释与箭头
     arrow_style = dict(arrowstyle="<->", facecolor='#16344C', edgecolor='#16344C', lw=2)
-    # 选择巡航阶段中点的一些索引用于注释（防止越界）
-    mid_idx = min(len(time) - 1, max(0, int(len(time) * 0.5)))
+    mid_idx = min(len(time) - 1, max(0, int(len(time) * 0.375)))  # 巡航阶段中点
     try:
+        # 巡航阶段温度/功率注释
         ax_temp.annotate('', xy=(time[mid_idx], 15), xytext=(time[mid_idx], 15 + 20), arrowprops=arrow_style)
         ax_power.annotate('', xy=(time[mid_idx], 1000 - 200), xytext=(time[mid_idx], 1000 + 200), arrowprops=arrow_style)
-        ax_temp.annotate('25 ± 10°C', xy=(time[mid_idx], 5), fontsize=16)
-        ax_power.annotate('1000±200W', xy=(time[mid_idx], 1250), fontsize=16)
-    except Exception:
-        pass
+        ax_temp.annotate('25 ± 10°C', xy=(time[mid_idx], 5), fontsize=14)
+        ax_power.annotate('1000±200W', xy=(time[mid_idx], 1250), fontsize=14)
+    except Exception as e:
+        print(f"添加注释失败: {e}")
 
     # 保存与显示
     if save_path is not None:
         try:
-            fig.savefig(save_path)
-        except Exception:
-            pass
+            fig.savefig(save_path, bbox_inches='tight', dpi=300)
+        except Exception as e:
+            print(f"保存图片失败: {e}")
 
     if show:
         plt.show()
@@ -221,11 +269,16 @@ class UAV_Load(object):
         temperature, power, time = generate_loads(seed=seed)
         if plot:
             plot_base_curve(time, temperature, power)
-        # 与旧接口兼容：返回 (temperature, power)
         return temperature, power
 
 
 # 当作为脚本直接运行时，绘制图像
 if __name__ == '__main__':
+    # 确保创建保存目录
+    import os
+    save_dir = "./Figures"
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+    
     temps, pows, t = generate_loads(seed=1)
-    plot_base_curve(t, temps, pows, save_path="../Figures/Power_Temperature.svg", show=True)
+    plot_base_curve(t, temps, pows, save_path="./Figures/Power_Temperature.svg", show=True)
