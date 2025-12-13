@@ -4,6 +4,7 @@ import time
 import numpy as np
 import matplotlib.patches as mpatches
 import os
+import argparse  # 新增：导入参数解析模块
 
 # 导入公共模块（与训练代码保持一致的导入形式）
 from MARL_Engine import setup_project_root, device, IndependentDQN
@@ -13,8 +14,34 @@ from Scripts.utils.global_utils import *
 # 获取字体（优先宋体+Times New Roman，解决中文/负号显示）
 font_get()
 
-# 全局设置
-torch.manual_seed(0)
+# ====================== 新增：命令行参数解析 ======================
+def parse_args():
+    """解析命令行参数（指定待测试模型路径）"""
+    parser = argparse.ArgumentParser(description='MARL模型测试脚本（支持指定待测试模型路径）')
+    
+    # 核心：模型路径参数（必选/可选）
+    parser.add_argument('--net-date', type=str, required=True,
+                        help='模型所在的日期文件夹（必填，如：1213）')
+    parser.add_argument('--train-id', type=str, required=True,
+                        help='模型对应的训练ID（必填，如：11）')
+    parser.add_argument('--model-prefix', type=str, required=True,
+                        help='模型前缀（必填，如：bs64_lr1_ep_315_pool50_freq50_MARL_MARL_IQL_32x20x2_MAX_R-54）')
+    
+    # 可选配置参数
+    parser.add_argument('--seed', type=int, default=0, help='随机种子（默认：0）')
+    parser.add_argument('--max-time', type=float, default=800.0, help='最大测试时长（秒，默认：800）')
+    parser.add_argument('--sc-threshold', type=float, default=1e-3, help='超级电容非活跃阈值（默认：1e-3）')
+    parser.add_argument('--show-plot', action='store_true', help='是否显示测试结果图（默认：仅保存不显示）')
+    parser.add_argument('--save-dir', type=str, default=None, help='结果保存目录（默认：模型所在目录）')
+    
+    return parser.parse_args()
+
+# 解析参数
+args = parse_args()
+# =====================================================================
+
+# 全局设置（从命令行参数读取）
+torch.manual_seed(args.seed)
 
 # 环境参数（从环境实例中动态获取，而非硬编码）
 N_FC_ACTIONS = 32
@@ -22,6 +49,22 @@ N_BAT_ACTIONS = 20
 N_SC_ACTIONS = 2
 
 if __name__ == '__main__':
+    # ====================== 动态配置模型路径（从命令行参数读取） ======================
+    # 打印配置确认信息
+    print("=" * 80)
+    print("                    测试配置确认                  ")
+    print("=" * 80)
+    print(f"待测试模型路径:")
+    print(f"  - 日期文件夹: {args.net_date}")
+    print(f"  - 训练ID: {args.train_id}")
+    print(f"  - 模型前缀: {args.model_prefix}")
+    print(f"测试配置:")
+    print(f"  - 随机种子: {args.seed}")
+    print(f"  - 最大测试时长: {args.max_time}秒")
+    print(f"  - 超级电容非活跃阈值: {args.sc_threshold}")
+    print(f"  - 显示结果图: {'是' if args.show_plot else '否'}")
+    print("=" * 80 + "\n")
+
     # 初始化环境
     env = Envs()
     
@@ -29,19 +72,16 @@ if __name__ == '__main__':
     N_STATES = env.observation_space.shape[0]
     print(f"自动识别环境状态维度: N_STATES = {N_STATES}")
 
-    # 模型路径配置（使用项目根路径拼接，支持任意路径执行）
-    net_data = '1213'          # 日期文件夹
-    train_id = '6'             # 训练ID
-    net_name_base = 'bs64_lr1_ep_79_pool50_freq50_MARL_MARL_IQL_32x20x2_MAX_R-18'
-
     # 初始化智能体（与训练代码参数保持一致）
     FC_Agent = IndependentDQN("FC_Agent", N_STATES, N_FC_ACTIONS)
     Bat_Agent = IndependentDQN("Bat_Agent", N_STATES, N_BAT_ACTIONS)
     SC_Agent = IndependentDQN("SC_Agent", N_STATES, N_SC_ACTIONS)
 
-    # 构建模型路径（基于项目根路径，支持任意工作目录执行）
-    MODEL_BASE_DIR = os.path.join(project_root, "nets", "Chap3", net_data, train_id)
-    MODEL_FILE_PREFIX = os.path.join(MODEL_BASE_DIR, net_name_base)
+    # 构建模型路径（基于项目根路径 + 命令行参数）
+    MODEL_BASE_DIR = os.path.join(project_root, "nets", "Chap3", args.net_date, args.train_id)
+    # 自定义保存目录（优先使用命令行指定的，否则用模型目录）
+    SAVE_DIR = args.save_dir if args.save_dir else MODEL_BASE_DIR
+    MODEL_FILE_PREFIX = os.path.join(MODEL_BASE_DIR, args.model_prefix)
     
     # 加载模型（增加路径合法性检查）
     try:
@@ -90,7 +130,7 @@ if __name__ == '__main__':
         'Logging_Processing': 0.0,
         'Other_Overhead': 0.0
     }
-    sc_inactive_threshold = 1e-3
+    sc_inactive_threshold = args.sc_threshold  # 从命令行参数读取
     dt = getattr(env, "dt", 1.0)
     time_start = time.time()
 
@@ -148,8 +188,8 @@ if __name__ == '__main__':
         episode_times['Other_Overhead'] += loop_time - (action_time + env_time + log_time)
 
         total_steps += 1
-        # 修复3：终止条件适配800秒总时长
-        if done or step * dt >= 800 - dt:  # 匹配Power_Profile的800秒总时长
+        # 修复3：终止条件适配命令行指定的最大时长
+        if done or step * dt >= args.max_time - dt:  # 从命令行参数读取最大时长
             break
         s = s_
         step += 1
@@ -187,7 +227,7 @@ if __name__ == '__main__':
     plot_loads = loads[:len(power_fc)]
     plot_temperature = temperature[:len(power_fc)]
 
-    # 功率曲线（适配800秒时长）
+    # 功率曲线（适配命令行指定的最大时长）
     l1, = ax1.plot(plot_times, plot_loads, label='Power Demand', color=colors[0], alpha=LINES_ALPHA)
     l2, = ax1.plot(plot_times, power_fc, label='Power Fuel Cell', color=colors[1], alpha=LINES_ALPHA)
     l3, = ax1.plot(plot_times, battery_power, label='Power Battery', color=colors[2], alpha=LINES_ALPHA)
@@ -196,7 +236,7 @@ if __name__ == '__main__':
     ax1.set_xlabel('Time/s', fontsize=LABEL_FONT_SIZE)
     ax1.set_ylabel('Power/W', fontsize=LABEL_FONT_SIZE)
     ax1.tick_params(axis='both', labelsize=LABEL_FONT_SIZE)
-    ax1.set_xlim(0, 800)  # 匹配Power_Profile的800秒总时长
+    ax1.set_xlim(0, args.max_time)  # 从命令行参数读取最大时长
     ax1.set_ylim(-2500, 5500)  # 匹配功率峰值5000W
 
     # SOC曲线
@@ -215,11 +255,12 @@ if __name__ == '__main__':
     ax3.tick_params(axis='y', labelcolor=colors[4], labelsize=LABEL_FONT_SIZE)
     ax3.set_ylim(-25, 40)  # 匹配Power_Profile的温度轴范围
 
-    # 修复5：阶段背景匹配Power_Profile的时间分段
-    ax1.axvspan(0, 200, alpha=0.2, color='lightblue', label='Flight Phase')       # 飞行阶段
-    ax1.axvspan(200, 400, alpha=0.2, color='lightgreen', label='Surface Sliding') # 水面滑行
-    ax1.axvspan(400, 600, alpha=0.2, color='salmon', label='Underwater Navigation') # 水下潜航
-    ax1.axvspan(600, 800, alpha=0.2, color='mediumpurple', label='Re-water Exit') # 再出水飞行
+    # 修复5：阶段背景匹配Power_Profile的时间分段（适配最大时长）
+    phase_split = args.max_time / 4  # 均分4个阶段
+    ax1.axvspan(0, phase_split, alpha=0.2, color='lightblue', label='Flight Phase')       # 飞行阶段
+    ax1.axvspan(phase_split, 2*phase_split, alpha=0.2, color='lightgreen', label='Surface Sliding') # 水面滑行
+    ax1.axvspan(2*phase_split, 3*phase_split, alpha=0.2, color='salmon', label='Underwater Navigation') # 水下潜航
+    ax1.axvspan(3*phase_split, args.max_time, alpha=0.2, color='mediumpurple', label='Re-water Exit') # 再出水飞行
 
     # 图例配置（优化布局）
     lines = [l1, l2, l3, l6, l4, l7, l5]
@@ -227,9 +268,12 @@ if __name__ == '__main__':
     ax1.legend(lines, labels, loc='upper center', bbox_to_anchor=(0.5, -0.15), ncol=4, fontsize=LABEL_FONT_SIZE-2)
     ax1.grid(linestyle='--', linewidth=0.5, alpha=0.5)
 
-    # 保存图像（使用项目根路径，确保保存路径正确）
-    save_path_svg = os.path.join(MODEL_BASE_DIR, f"{net_name_base}_Test_Result.svg")
-    save_path_png = os.path.join(MODEL_BASE_DIR, f"{net_name_base}_Test_Result.png")
+    # 确保保存目录存在
+    os.makedirs(SAVE_DIR, exist_ok=True)
+    
+    # 保存图像（使用命令行指定的保存目录）
+    save_path_svg = os.path.join(SAVE_DIR, f"{args.model_prefix}_Test_Result.svg")
+    save_path_png = os.path.join(SAVE_DIR, f"{args.model_prefix}_Test_Result.png")
     
     plt.savefig(save_path_svg, bbox_inches='tight', dpi=1200)
     plt.savefig(save_path_png, dpi=1200, bbox_inches='tight')
@@ -263,7 +307,10 @@ if __name__ == '__main__':
     print(f"  平均步耗时：{total_time/total_steps:.6f}s/步")
     print("="*60)
 
-    # 可选：显示图像
-    # plt.show()
+    # 显示图像（根据命令行参数控制）
+    if args.show_plot:
+        plt.show()
+    else:
+        plt.close()  # 关闭图像释放内存
     
-    print(f"\n✅ 测试完成！所有结果已保存至：{MODEL_BASE_DIR}")
+    print(f"\n✅ 测试完成！所有结果已保存至：{SAVE_DIR}")

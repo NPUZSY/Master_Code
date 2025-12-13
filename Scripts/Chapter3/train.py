@@ -1,6 +1,7 @@
 import os
 import time
 import json
+import argparse  # 新增：导入参数解析模块
 import numpy as np
 import matplotlib.pyplot as plt
 from torch.utils.tensorboard import SummaryWriter
@@ -19,30 +20,62 @@ from Scripts.utils.global_utils import *
 # 获取字体（优先宋体+Times New Roman，解决中文/负号显示）
 font_get()
 
-# 全局设置与超参数
-env = Envs()
-writer = SummaryWriter()
-torch.set_default_dtype(torch.float32)
+# ====================== 新增：命令行参数解析 ======================
+def parse_args():
+    """解析命令行参数"""
+    parser = argparse.ArgumentParser(description='MARL训练脚本（支持从头训练/继续训练）')
+    
+    # 核心训练模式参数
+    parser.add_argument('--resume-training', action='store_true', 
+                        help='是否基于已有模型继续训练（默认：从头训练）')
+    parser.add_argument('--pretrain-date', type=str, default="1213",
+                        help='预训练模型的日期文件夹（仅resume-training=True时生效）')
+    parser.add_argument('--pretrain-train-id', type=str, default="6",
+                        help='预训练模型的train_id（仅resume-training=True时生效）')
+    parser.add_argument('--pretrain-model-prefix', type=str, 
+                        default="bs64_lr1_ep_79_pool50_freq50_MARL_MARL_IQL_32x20x2_MAX_R-18",
+                        help='预训练模型前缀（仅resume-training=True时生效）')
+    
+    # 训练超参数（可选，支持命令行覆盖默认值）
+    parser.add_argument('--batch-size', type=int, default=64, help='批大小（默认：64）')
+    parser.add_argument('--lr', type=float, default=1e-4, help='学习率（默认：1e-4）')
+    parser.add_argument('--epsilon', type=float, default=0.9, help='探索率（默认：0.9）')
+    parser.add_argument('--gamma', type=float, default=0.95, help='折扣因子（默认：0.95）')
+    parser.add_argument('--pool-size', type=int, default=50, help='池大小（默认：50）')
+    parser.add_argument('--episode', type=int, default=1000, help='训练回合数（默认：2000）')
+    parser.add_argument('--learn-frequency', type=int, default=50, help='学习频率（默认：50）')
+    
+    # 路径参数（可选）
+    parser.add_argument('--log-dir', type=str, default=None, help='TensorBoard日志目录（默认：自动生成）')
+    
+    return parser.parse_args()
 
-# ====================== 新增：继续训练相关超参数 ======================
-# 是否继续训练（True=读取预训练模型，False=从头训练）
-RESUME_TRAINING = True
-# 预训练模型路径配置（需根据实际情况修改）
-PRETRAIN_DATE = "1213"          # 预训练模型的日期文件夹
-PRETRAIN_TRAIN_ID = "6"         # 预训练模型的train_id
-PRETRAIN_MODEL_PREFIX = "bs64_lr1_ep_79_pool50_freq50_MARL_MARL_IQL_32x20x2_MAX_R-18"  # 预训练模型前缀
+# 解析参数
+args = parse_args()
 # =====================================================================
 
-# 超参数
-BATCH_SIZE = 64
-LR = 1e-4
-EPSILON = 0.9
-GAMMA = 0.95
+# 全局设置与超参数
+env = Envs()
+writer = SummaryWriter(log_dir=args.log_dir)  # 使用命令行指定的日志目录
+torch.set_default_dtype(torch.float32)
+
+# ====================== 动态配置超参数（从命令行参数读取） ======================
+# 核心超参数（支持命令行覆盖）
+BATCH_SIZE = args.batch_size
+LR = args.lr
+EPSILON = args.epsilon
+GAMMA = args.gamma
 TARGET_REPLACE_ITER = 100
-POOL_SIZE = 50
-EPISODE = 2000
-LEARN_FREQUENCY = 50
+POOL_SIZE = args.pool_size
+EPISODE = args.episode
+LEARN_FREQUENCY = args.learn_frequency
 REAL_TIME_DRAW = False
+
+# 继续训练配置（从命令行参数读取）
+RESUME_TRAINING = args.resume_training
+PRETRAIN_DATE = args.pretrain_date
+PRETRAIN_TRAIN_ID = args.pretrain_train_id
+PRETRAIN_MODEL_PREFIX = args.pretrain_model_prefix
 
 # 学习率调度与早停参数
 LR_PATIENCE = 50
@@ -64,13 +97,13 @@ local_time = time.localtime(current_timestamp)
 execute_date = time.strftime("%m%d", local_time)
 execute_time = time.strftime("%H%M%S", local_time)  # 新增：记录具体时间
 
-# ====================== 修改：remark包含基础模型信息 ======================
+# ====================== 动态生成remark（包含命令行参数信息） ======================
 if RESUME_TRAINING:
-    # 继续训练时，remark标记基础模型信息
-    remark = f"RESUME_{PRETRAIN_MODEL_PREFIX}_MARL_IQL_32x20x2"
+    # 继续训练时，remark标记基础模型信息和命令行参数
+    remark = f"RESUME_{PRETRAIN_MODEL_PREFIX}_bs{BATCH_SIZE}_lr{int(LR*10000)}_MARL_IQL_32x20x2"
 else:
-    # 从头训练时使用原有remark
-    remark = "MARL_IQL_32x20x2"
+    # 从头训练时，remark包含超参数信息
+    remark = f"FROM_SCRATCH_bs{BATCH_SIZE}_lr{int(LR*10000)}_MARL_IQL_32x20x2"
 # =====================================================================
 
 # 新增：全局变量存储最优模型文件名
@@ -81,14 +114,14 @@ N_EXPECTED_ACTIONS = N_FC_ACTIONS * N_BAT_ACTIONS * N_SC_ACTIONS
 if N_EXPECTED_ACTIONS != N_TOTAL_ACTIONS:
     print(f"警告：动作分解 {N_EXPECTED_ACTIONS} 与环境 N_TOTAL_ACTIONS({N_TOTAL_ACTIONS}) 不匹配")
 
-# 新增：定义保存超参数的函数
+# 新增：定义保存超参数的函数（新增命令行参数记录）
 def save_hyperparameters(save_path, final_metrics=None):
     """
     保存超参数到指定路径（txt和json格式）
     :param save_path: 保存目录
     :param final_metrics: 训练最终指标（如最大奖励、最终奖励等）
     """
-    # 整理超参数字典
+    # 整理超参数字典（新增命令行参数记录）
     hyperparams = {
         # 基础信息
         "train_info": {
@@ -98,10 +131,11 @@ def save_hyperparameters(save_path, final_metrics=None):
             "remark": remark,
             "device": str(device),
             "total_training_time_s": round(time.time() - start_time_total, 2) if 'start_time_total' in globals() else 0,
-            "best_model_base_name": best_model_base_name,  # 新增：最优模型文件名前缀
-            "best_model_full_path": os.path.join(save_path, best_model_base_name) if best_model_base_name else "",  # 新增：最优模型完整路径
-            "resume_training": RESUME_TRAINING,  # 新增：是否继续训练
-            "pretrain_model_info": {  # 新增：预训练模型信息
+            "best_model_base_name": best_model_base_name,
+            "best_model_full_path": os.path.join(save_path, best_model_base_name) if best_model_base_name else "",
+            "resume_training": RESUME_TRAINING,
+            "command_line_args": vars(args),  # 新增：记录所有命令行参数
+            "pretrain_model_info": {
                 "pretrain_date": PRETRAIN_DATE if RESUME_TRAINING else "",
                 "pretrain_train_id": PRETRAIN_TRAIN_ID if RESUME_TRAINING else "",
                 "pretrain_model_prefix": PRETRAIN_MODEL_PREFIX if RESUME_TRAINING else ""
@@ -158,7 +192,7 @@ def save_hyperparameters(save_path, final_metrics=None):
             f.write("-" * 60 + "\n")
             for key, value in params.items():
                 # 对关键信息高亮显示
-                if key in ["best_model_base_name", "best_model_full_path", "resume_training", "pretrain_model_prefix"]:
+                if key in ["best_model_base_name", "best_model_full_path", "resume_training", "pretrain_model_prefix", "command_line_args"]:
                     f.write(f"{key:<30}: \033[1;32m{value}\033[0m\n")  # 绿色高亮
                 else:
                     f.write(f"{key:<30}: {value}\n")
@@ -187,7 +221,7 @@ def print_time_breakdown(episode, episode_times):
         print(f"| {name.ljust(15)} | {time_val:9.4f} s | {percentage:6.2f} % |")
     print("=" * 45)
 
-# ====================== 新增：加载预训练模型函数 ======================
+# ====================== 加载预训练模型函数（保持不变） ======================
 def load_pretrained_models(agents, pretrain_date, pretrain_train_id, model_prefix):
     """
     加载预训练模型到智能体
@@ -219,6 +253,23 @@ def load_pretrained_models(agents, pretrain_date, pretrain_train_id, model_prefi
 # =====================================================================
 
 if __name__ == '__main__':
+    # 打印命令行参数（便于确认配置）
+    print("=" * 80)
+    print("                    训练配置确认                  ")
+    print("=" * 80)
+    print(f"训练模式: {'继续训练（基于已有模型）' if RESUME_TRAINING else '从头训练'}")
+    if RESUME_TRAINING:
+        print(f"预训练模型配置:")
+        print(f"  - 日期文件夹: {PRETRAIN_DATE}")
+        print(f"  - Train ID: {PRETRAIN_TRAIN_ID}")
+        print(f"  - 模型前缀: {PRETRAIN_MODEL_PREFIX}")
+    print(f"核心超参数:")
+    print(f"  - 批大小: {BATCH_SIZE}")
+    print(f"  - 学习率: {LR:.6f}")
+    print(f"  - 探索率: {EPSILON}")
+    print(f"  - 训练回合数: {EPISODE}")
+    print("=" * 80 + "\n")
+
     # 路径设置
     TARGET_BASE_DIR = os.path.join(project_root, "nets", "Chap3", execute_date)
     os.makedirs(TARGET_BASE_DIR, exist_ok=True)
@@ -246,11 +297,10 @@ if __name__ == '__main__':
     )
     all_agents = [FC_Agent, Bat_Agent, SC_Agent]
 
-    # ====================== 新增：加载预训练模型 ======================
+    # 加载预训练模型（从命令行参数判断）
     if RESUME_TRAINING:
         print("\n📌 开始加载预训练模型...")
         load_pretrained_models(all_agents, PRETRAIN_DATE, PRETRAIN_TRAIN_ID, PRETRAIN_MODEL_PREFIX)
-    # =====================================================================
 
     # 设置优化器
     for agent in all_agents:
@@ -342,9 +392,9 @@ if __name__ == '__main__':
         if ep_r > reward_max + REWARD_THRESHOLD:
             reward_max = ep_r
             reward_not_improve_episodes = 0
-            best_model_base_name = (f"bs{BATCH_SIZE}_lr{int(LR*10000)}_ep_{i_episode+1}"  # 新增：更新全局最优模型名称
+            best_model_base_name = (f"bs{BATCH_SIZE}_lr{int(LR*10000)}_ep_{i_episode+1}"
                                    f"_pool{POOL_SIZE}_freq{LEARN_FREQUENCY}_MARL_{remark}_MAX_R{int(reward_max)}")
-            net_name_base = best_model_base_name  # 保持原有逻辑
+            net_name_base = best_model_base_name
             torch.save(FC_Agent.eval_net.state_dict(), f"{base_path}/{net_name_base}_FC.pth")
             torch.save(Bat_Agent.eval_net.state_dict(), f"{base_path}/{net_name_base}_BAT.pth")
             torch.save(SC_Agent.eval_net.state_dict(), f"{base_path}/{net_name_base}_SC.pth")
@@ -370,7 +420,7 @@ if __name__ == '__main__':
     torch.save(SC_Agent.eval_net.state_dict(), f"{final_net_name_base}_SC.pth")
     print(f"\nFinal models saved: {final_net_name_base}")
 
-    # 新增：整理训练最终指标
+    # 整理训练最终指标
     final_metrics = {
         "max_reward": round(reward_max, 4),
         "final_reward": round(y[-1], 4) if y else 0,
@@ -379,10 +429,10 @@ if __name__ == '__main__':
         "early_stopped": training_done,
         "final_learning_rate": round(FC_Agent.optimizer.param_groups[0]["lr"], 6),
         "reward_not_improve_episodes": reward_not_improve_episodes,
-        "best_model_reward": round(reward_max, 4)  # 新增：最优模型对应的奖励
+        "best_model_reward": round(reward_max, 4)
     }
 
-    # 新增：保存超参数
+    # 保存超参数（包含命令行参数记录）
     save_hyperparameters(base_path, final_metrics)
 
     # 可视化与保存
@@ -400,7 +450,6 @@ if __name__ == '__main__':
         plt.show()
 
     print(f"\n🎉 训练完成！所有文件已保存到: {base_path}")
-    # 最终再次打印最优模型名称（方便复制）
     if best_model_base_name:
         print(f"\n📋 最优模型文件名前缀（直接复制即可）：")
         print(f"{best_model_base_name}")
