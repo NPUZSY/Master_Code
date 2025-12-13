@@ -6,11 +6,11 @@ import matplotlib.patches as mpatches
 import os
 
 # 导入公共模块（与训练代码保持一致的导入形式）
-from MARL_Engine import setup_project_root, device, IndependentDQN, font_get
+from MARL_Engine import setup_project_root, device, IndependentDQN
 project_root = setup_project_root()
 from Scripts.Env import Envs
-
-# 获取新罗马字体
+from Scripts.utils.global_utils import *
+# 获取字体（优先宋体+Times New Roman，解决中文/负号显示）
 font_get()
 
 # 全局设置
@@ -31,8 +31,8 @@ if __name__ == '__main__':
 
     # 模型路径配置（使用项目根路径拼接，支持任意路径执行）
     net_data = '1213'          # 日期文件夹
-    train_id = '0'             # 训练ID
-    net_name_base = 'bs32_lr20_ep_1_pool100_freq10_MARL_MARL_IQL_32x20x2_MAX_R-816'
+    train_id = '3'             # 训练ID
+    net_name_base = 'bs64_lr10_ep_173_pool100_freq10_MARL_MARL_IQL_32x20x2_MAX_R-57'
 
     # 初始化智能体（与训练代码参数保持一致）
     FC_Agent = IndependentDQN("FC_Agent", N_STATES, N_FC_ACTIONS)
@@ -72,8 +72,9 @@ if __name__ == '__main__':
     soc_bat = []
     soc_sc_list = []
     times = []
-    loads = env.loads[:-1]
-    temperature = env.temperature[:-1]
+    # 修复1：统一数据长度（去掉[:-1]避免维度不匹配）
+    loads = env.loads
+    temperature = env.temperature
     ep_r = 0
 
     # 统计变量初始化
@@ -114,7 +115,7 @@ if __name__ == '__main__':
         # 统计数据收集
         total_fc_H2_g += float(info.get("C_fc_g", 0.0))
         total_bat_H2_g += float(info.get("C_bat_g", 0.0))
-        times.append(step)
+        times.append(step * dt)  # 修复2：时间轴基于dt，与Power_Profile对齐
         power_fc.append(float(s_[2]))
         battery_power.append(float(s_[3]))
         power_sc.append(float(s_[4]))
@@ -147,7 +148,8 @@ if __name__ == '__main__':
         episode_times['Other_Overhead'] += loop_time - (action_time + env_time + log_time)
 
         total_steps += 1
-        if done or step >= len(loads)-1:
+        # 修复3：终止条件适配800秒总时长
+        if done or step * dt >= 800 - dt:  # 匹配Power_Profile的800秒总时长
             break
         s = s_
         step += 1
@@ -164,8 +166,12 @@ if __name__ == '__main__':
     sc_inactive_steps = sum(1 for p in power_sc if abs(p) < sc_inactive_threshold)
     sc_inactive_ratio = sc_inactive_steps / total_steps if total_steps > 0 else 0.0
 
-    # 绘图配置（与训练代码保持一致的字体设置）
-    plt.rcParams['font.family'] = 'Times New Roman'
+    # 绘图配置（适配Power_Profile的最新修改）
+    plt.rcParams.update({
+        'font.family': ['Times New Roman'],  # 兼容中英文
+        'axes.unicode_minus': False,
+        'font.size': 12
+    })
     best_color = ['#3570a8', '#f09639', '#42985e', '#c84343', '#8a7ab5']
     article_color = ['#f09639', '#c84343', '#42985e', '#8a7ab5', '#3570a8']
     colors = article_color
@@ -175,34 +181,50 @@ if __name__ == '__main__':
     # 绘制结果图
     fig, ax1 = plt.subplots(figsize=(15, 5))
     fig.subplots_adjust(top=0.965, bottom=0.125, left=0.085, right=0.875)
-    l1, = ax1.plot(times, loads[:len(times)], label='Power Demand', color=colors[0], alpha=LINES_ALPHA)
-    l2, = ax1.plot(times, power_fc, label='Power Fuel Cell', color=colors[1], alpha=LINES_ALPHA)
-    l3, = ax1.plot(times, battery_power, label='Power Battery', color=colors[2], alpha=LINES_ALPHA)
-    l6, = ax1.plot(times, power_sc, label='Power SuperCap', color='k', linestyle='--', alpha=LINES_ALPHA)
+    
+    # 修复4：统一数据长度（截断到实际测试步数）
+    plot_times = times[:len(power_fc)]
+    plot_loads = loads[:len(power_fc)]
+    plot_temperature = temperature[:len(power_fc)]
+
+    # 功率曲线（适配800秒时长）
+    l1, = ax1.plot(plot_times, plot_loads, label='Power Demand', color=colors[0], alpha=LINES_ALPHA)
+    l2, = ax1.plot(plot_times, power_fc, label='Power Fuel Cell', color=colors[1], alpha=LINES_ALPHA)
+    l3, = ax1.plot(plot_times, battery_power, label='Power Battery', color=colors[2], alpha=LINES_ALPHA)
+    l6, = ax1.plot(plot_times, power_sc, label='Power SuperCap', color='k', linestyle='--', alpha=LINES_ALPHA)
 
     ax1.set_xlabel('Time/s', fontsize=LABEL_FONT_SIZE)
     ax1.set_ylabel('Power/W', fontsize=LABEL_FONT_SIZE)
     ax1.tick_params(axis='both', labelsize=LABEL_FONT_SIZE)
+    ax1.set_xlim(0, 800)  # 匹配Power_Profile的800秒总时长
+    ax1.set_ylim(-2500, 5500)  # 匹配功率峰值5000W
 
+    # SOC曲线
     ax2 = ax1.twinx()
-    l4, = ax2.plot(times, soc_bat, label='Battery SOC', color=colors[3], alpha=LINES_ALPHA)
-    l7, = ax2.plot(times, soc_sc_list, label='SuperCap SOC', color='grey', linestyle=':', alpha=LINES_ALPHA)
+    l4, = ax2.plot(plot_times, soc_bat, label='Battery SOC', color=colors[3], alpha=LINES_ALPHA)
+    l7, = ax2.plot(plot_times, soc_sc_list, label='SuperCap SOC', color='grey', linestyle=':', alpha=LINES_ALPHA)
     ax2.set_ylabel('SOC', fontsize=LABEL_FONT_SIZE)
     ax2.tick_params(axis='y', labelsize=LABEL_FONT_SIZE)
+    ax2.set_ylim(0, 1.0)  # SOC范围0-1
 
+    # 温度曲线（适配-25~40℃范围）
     ax3 = ax1.twinx()
     ax3.spines['right'].set_position(('outward', 65))
-    l5, = ax3.plot(times, temperature[:len(times)], label='Environment Temperature', color=colors[4], alpha=LINES_ALPHA)
-    ax3.set_ylabel('Environment Temperature/℃', color=colors[4], fontsize=LABEL_FONT_SIZE)
+    l5, = ax3.plot(plot_times, plot_temperature, label='Environment Temperature', color=colors[4], alpha=LINES_ALPHA)
+    ax3.set_ylabel('Environment Temperature/°C', color=colors[4], fontsize=LABEL_FONT_SIZE)
     ax3.tick_params(axis='y', labelcolor=colors[4], labelsize=LABEL_FONT_SIZE)
+    ax3.set_ylim(-25, 40)  # 匹配Power_Profile的温度轴范围
 
-    # 图例配置
+    # 修复5：阶段背景匹配Power_Profile的时间分段
+    ax1.axvspan(0, 200, alpha=0.2, color='lightblue', label='Flight Phase')       # 飞行阶段
+    ax1.axvspan(200, 400, alpha=0.2, color='lightgreen', label='Surface Sliding') # 水面滑行
+    ax1.axvspan(400, 600, alpha=0.2, color='salmon', label='Underwater Navigation') # 水下潜航
+    ax1.axvspan(600, 800, alpha=0.2, color='mediumpurple', label='Re-water Exit') # 再出水飞行
+
+    # 图例配置（优化布局）
     lines = [l1, l2, l3, l6, l4, l7, l5]
     labels = [line.get_label() for line in lines]
-    ax1.legend(lines, labels, loc='lower center', ncol=3)
-    ax1.axvspan(0, 150, alpha=0.2, color='lightblue')
-    ax1.axvspan(150, 450, alpha=0.2, color='lightgreen')
-    ax1.axvspan(450, 600, alpha=0.2, color='salmon')
+    ax1.legend(lines, labels, loc='upper center', bbox_to_anchor=(0.5, -0.15), ncol=4, fontsize=LABEL_FONT_SIZE-2)
     ax1.grid(linestyle='--', linewidth=0.5, alpha=0.5)
 
     # 保存图像（使用项目根路径，确保保存路径正确）

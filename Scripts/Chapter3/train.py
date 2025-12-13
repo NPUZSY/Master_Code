@@ -10,13 +10,13 @@ import torch
 # 导入公共模块
 from MARL_Engine import (
     setup_project_root, device, 
-    IndependentDQN, get_max_folder_name,
-    font_get
+    IndependentDQN, get_max_folder_name
 )
 project_root = setup_project_root()
 from Scripts.Env import Envs
 
-# 获取新罗马
+from Scripts.utils.global_utils import *
+# 获取字体（优先宋体+Times New Roman，解决中文/负号显示）
 font_get()
 
 # 全局设置与超参数
@@ -25,20 +25,20 @@ writer = SummaryWriter()
 torch.set_default_dtype(torch.float32)
 
 # 超参数
-BATCH_SIZE = 32
-LR = 0.002
+BATCH_SIZE = 64
+LR = 0.001
 EPSILON = 0.9
 GAMMA = 0.9
 TARGET_REPLACE_ITER = 100
 POOL_SIZE = 100
-EPISODE = 1000
+EPISODE = 2000
 LEARN_FREQUENCY = 10
 REAL_TIME_DRAW = False
 
 # 学习率调度与早停参数
 LR_PATIENCE = 50
 LR_FACTOR = 0.5
-EARLY_STOP_PATIENCE = 100
+EARLY_STOP_PATIENCE = 500
 REWARD_THRESHOLD = 0.001
 
 # 环境参数
@@ -334,8 +334,7 @@ if __name__ == '__main__':
     plt.ylabel('Episode Reward')
     plt.title(f'Training Curve (MARL_IQL, Ep={final_episode})')
     plt.grid(True, linestyle='--', alpha=0.7)
-    plt.savefig(f"{base_path}/train_curve_MARL_IQL_bs{BATCH_SIZE}_lr{int(LR*10000)}_ep{final_episode}.svg", 
-                bbox_inches='tight', dpi=300)
+    plt.savefig(f"{base_path}/train_curve_MARL_IQL_bs{BATCH_SIZE}_lr{int(LR*10000)}_ep{final_episode}.svg")
     if REAL_TIME_DRAW:
         plt.ioff()
         plt.show()

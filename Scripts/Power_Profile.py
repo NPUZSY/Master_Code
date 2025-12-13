@@ -3,51 +3,8 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import numpy as np
 from scipy.signal import savgol_filter
-
-def font_get():
-    """
-    加载Times New Roman和宋体(SimSun)字体，自动适配中英文显示
-    - 英文：Times New Roman
-    - 中文：SimSun（宋体）
-    """
-    import os
-    import matplotlib.font_manager as fm
-    import matplotlib.pyplot as plt
-
-    # 定义字体路径
-    tnr_font_path = '/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman.ttf'
-    simsun_font_path = '/usr/share/fonts/truetype/simsun.ttc'
-
-    # 加载字体文件
-    font_paths = []
-    if os.path.exists(tnr_font_path):
-        fm.fontManager.addfont(tnr_font_path)
-        font_paths.append(tnr_font_path)
-        print(f"成功加载Times New Roman: {tnr_font_path}")
-    if os.path.exists(simsun_font_path):
-        fm.fontManager.addfont(simsun_font_path)
-        font_paths.append(simsun_font_path)
-        print(f"成功加载宋体(SimSun): {simsun_font_path}")
-
-    # 关键配置：优先宋体（支持中文），后备Times New Roman（支持英文）
-    plt.rcParams.update({
-        'font.family': ['SimSun', 'Times New Roman'],  # 宋体在前，优先渲染中文
-        'font.sans-serif': ['SimSun', 'Times New Roman'],
-        'axes.unicode_minus': False,  # 解决负号显示问题
-        'font.size': 12
-    })
-
-    # 验证加载
-    try:
-        simsun_fp = fm.FontProperties(family='SimSun')
-        tnr_fp = fm.FontProperties(family='Times New Roman')
-        print(f"\n字体验证：")
-        print(f"- 宋体路径: {fm.findfont(simsun_fp)}")
-        print(f"- Times New Roman路径: {fm.findfont(tnr_fp)}")
-    except Exception as e:
-        print(f"字体验证失败: {e}")
-
-# 调用字体加载函数
+from Scripts.utils.global_utils import *
+# 获取字体（优先宋体+Times New Roman，解决中文/负号显示）
 font_get()
 
 # 默认噪声参数与滤波参数（可在函数调用时覆盖）
