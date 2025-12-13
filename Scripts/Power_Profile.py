@@ -3,6 +3,13 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import numpy as np
 from scipy.signal import savgol_filter
+import os
+import sys
+
+# 获取当前脚本的绝对路径（无论从哪执行，都能定位到脚本所在目录）
+current_script_dir = os.path.dirname(os.path.abspath(__file__))
+# 将脚本所在目录加入Python搜索路径
+sys.path.append(current_script_dir)
 from utils.global_utils import *
 # 获取字体（优先宋体+Times New Roman，解决中文/负号显示）
 font_get()

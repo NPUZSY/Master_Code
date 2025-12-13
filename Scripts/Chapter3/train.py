@@ -1,6 +1,8 @@
 import os
 import time
 import json
+import subprocess
+import sys
 import argparse  # 新增：导入参数解析模块
 import numpy as np
 import matplotlib.pyplot as plt
@@ -40,8 +42,8 @@ def parse_args():
     parser.add_argument('--batch-size', type=int, default=64, help='批大小（默认：64）')
     parser.add_argument('--lr', type=float, default=1e-4, help='学习率（默认：1e-4）')
     parser.add_argument('--epsilon', type=float, default=0.9, help='探索率（默认：0.9）')
-    parser.add_argument('--gamma', type=float, default=0.95, help='折扣因子（默认：0.95）')
-    parser.add_argument('--pool-size', type=int, default=50, help='池大小（默认：50）')
+    parser.add_argument('--gamma', type=float, default=0.9, help='折扣因子（默认：0.95）')
+    parser.add_argument('--pool-size', type=int, default=100, help='池大小（默认：50）')
     parser.add_argument('--episode', type=int, default=1000, help='训练回合数（默认：2000）')
     parser.add_argument('--learn-frequency', type=int, default=50, help='学习频率（默认：50）')
     
@@ -448,6 +450,26 @@ if __name__ == '__main__':
     if REAL_TIME_DRAW:
         plt.ioff()
         plt.show()
+
+    print(f"\n🎉 训练完成！所有文件已保存到: {base_path}")
+    if best_model_base_name:
+        print(f"\n📋 最优模型文件名前缀（直接复制即可）：")
+        print(f"{best_model_base_name}")
+
+
+    # 执行测试
+    test_script_path = os.path.join(project_root, "Scripts", "Chapter3", "test.py")
+    # 构造测试命令参数
+    test_cmd = [
+        str(sys.executable),                # Python解释器（强制转字符串）
+        str(test_script_path),              # 测试脚本路径（强制转字符串）
+        "--net-date", str(execute_date),    # 日期（强制转字符串）
+        "--train-id", str(train_id),        # train_id（强制转字符串）
+        "--model-prefix", str(best_model_base_name)  # 模型前缀（强制转字符串）
+    ]
+    # 执行测试脚本
+    print("\n🚀 开始执行测试脚本...")
+    subprocess.run(test_cmd, check=True)
 
     print(f"\n🎉 训练完成！所有文件已保存到: {base_path}")
     if best_model_base_name:
