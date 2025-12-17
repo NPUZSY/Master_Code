@@ -41,7 +41,7 @@ class Envs(gym.Env):
         # -------------------
         # 奖励权重
         # -------------------
-        self.w1 = -0.6
+        self.w1 = -0.1
         self.w2 = -1.2
         self.w3 = -10
         # 新增：超级电容过充/过放惩罚权重（功率的10倍）
@@ -79,11 +79,11 @@ class Envs(gym.Env):
         # -------------------
         self.K_FC_MIN = -15
         self.K_FC_MAX = 16
-        self.K_BAT_MIN = -10
-        self.K_BAT_MAX = 9
+        self.K_BAT_MIN = -20
+        self.K_BAT_MAX = 19
 
         self.N_FC_ACTIONS = self.K_FC_MAX - self.K_FC_MIN + 1  # 32
-        self.N_BAT_ACTIONS = self.K_BAT_MAX - self.K_BAT_MIN + 1  # 20
+        self.N_BAT_ACTIONS = self.K_BAT_MAX - self.K_BAT_MIN + 1  # 40
         self.N_SC_ACTIONS = 2  # 2
 
         # ❗ 注意：N_ACTIONS 仅用于兼容旧的单整数动作空间或日志，现已无实际意义
@@ -131,7 +131,7 @@ class Envs(gym.Env):
         # Bat 动作索引 0..19 对应 k in [-10..9]
         k = self.K_BAT_MIN + int(idx)
         # 功率步长为 0.1 * P_BAT_MAX
-        p = k * 0.1 * self.P_BAT_MAX
+        p = k * 0.05 * self.P_BAT_MAX
         return float(p)
 
     # -------------------
@@ -329,7 +329,7 @@ class Envs(gym.Env):
         # 匹配误差（保持原有逻辑）
         # ----------------------------
         # 完全没匹配上的功率和又超级电容补充的功率
-        r_match = abs(P_load - self.power_fc - P_bat_final)
+        r_match = abs(P_load - self.power_fc - P_bat_final) + current_sc_punish
 
         # ----------------------------
         # 总奖励（新增超级电容过充/过放惩罚项）
@@ -337,9 +337,8 @@ class Envs(gym.Env):
         reward = float(
             self.w1 * (C_fc + C_bat) + 
             self.w2 * (r_fc + r_bat) + 
-            self.w3 * r_match - 
-            current_sc_punish  # 减去当前步超级电容惩罚（惩罚值为正，故用减号）
-        )
+            self.w3 * r_match
+        ) / self.step_length
 
         # ----------------------------
         # 时间推进与终止（保持原有逻辑）

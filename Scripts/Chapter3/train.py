@@ -30,22 +30,22 @@ def parse_args():
     # 核心训练模式参数
     parser.add_argument('--resume-training', action='store_true', 
                         help='是否基于已有模型继续训练（默认：从头训练）')
-    parser.add_argument('--pretrain-date', type=str, default="1216",
+    parser.add_argument('--pretrain-date', type=str, default="1217",
                         help='预训练模型的日期文件夹（仅resume-training=True时生效）')
-    parser.add_argument('--pretrain-train-id', type=str, default="2",
+    parser.add_argument('--pretrain-train-id', type=str, default="27",
                         help='预训练模型的train_id（仅resume-training=True时生效）')
     parser.add_argument('--pretrain-model-prefix', type=str, 
-                        default="bs64_lr0_ep_445_pool100_freq50_MARL_FROM_SCRATCH_bs64_lr0_MARL_IQL_32x20x2_MAX_R-17",
+                        default="bs32_lr1_ep_1914_pool100_freq50_MARL_FROM_SCRATCH_bs32_lr1_MARL_IQL_32x20x2_MAX_R-923",
                         help='预训练模型前缀（仅resume-training=True时生效）')
     
     # 训练超参数（可选，支持命令行覆盖默认值）
-    parser.add_argument('--batch-size', type=int, default=64, help='批大小（默认：64）')
+    parser.add_argument('--batch-size', type=int, default=32, help='批大小（默认：64）')
     parser.add_argument('--lr', type=float, default=1e-5, help='学习率（默认：1e-5）')
     parser.add_argument('--epsilon', type=float, default=0.9, help='探索率（默认：0.9）')
     parser.add_argument('--gamma', type=float, default=0.95, help='折扣因子（默认：0.95）')
-    parser.add_argument('--pool-size', type=int, default=50, help='池大小（默认：50）')
+    parser.add_argument('--pool-size', type=int, default=100, help='池大小（默认：50）')
     parser.add_argument('--episode', type=int, default=5000, help='训练回合数（默认：1000）')
-    parser.add_argument('--learn-frequency', type=int, default=50, help='学习频率（默认：50）')
+    parser.add_argument('--learn-frequency', type=int, default=5000, help='学习频率（默认：50）')
     
     # 路径参数（可选）
     parser.add_argument('--log-dir', type=str, default=None, help='TensorBoard日志目录（默认：自动生成）')
@@ -80,8 +80,8 @@ PRETRAIN_TRAIN_ID = args.pretrain_train_id
 PRETRAIN_MODEL_PREFIX = args.pretrain_model_prefix
 
 # 学习率调度与早停参数
-LR_PATIENCE = 100
-LR_FACTOR = 0.8
+LR_PATIENCE = 200
+LR_FACTOR = 0.5
 EARLY_STOP_PATIENCE = 1000
 REWARD_THRESHOLD = 0.001
 
@@ -89,7 +89,7 @@ REWARD_THRESHOLD = 0.001
 N_STATES = env.observation_space.shape[0]
 N_TOTAL_ACTIONS = env.N_ACTIONS
 N_FC_ACTIONS = 32
-N_BAT_ACTIONS = 20
+N_BAT_ACTIONS = 40
 N_SC_ACTIONS = 2
 
 # 内存配置
@@ -494,6 +494,7 @@ if __name__ == '__main__':
     ]
     # 执行测试脚本
     print("\n🚀 开始执行测试脚本...")
+    print(test_cmd)
     subprocess.run(test_cmd, check=True)
 
     print(f"\n🎉 训练完成！所有文件已保存到: {base_path}")

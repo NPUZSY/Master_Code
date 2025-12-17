@@ -45,7 +45,7 @@ torch.manual_seed(args.seed)
 
 # 环境参数（从环境实例中动态获取，而非硬编码）
 N_FC_ACTIONS = 32
-N_BAT_ACTIONS = 20
+N_BAT_ACTIONS = 40
 N_SC_ACTIONS = 2
 
 if __name__ == '__main__':
