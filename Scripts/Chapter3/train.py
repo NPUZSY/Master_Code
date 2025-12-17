@@ -30,20 +30,20 @@ def parse_args():
     # 核心训练模式参数
     parser.add_argument('--resume-training', action='store_true', 
                         help='是否基于已有模型继续训练（默认：从头训练）')
-    parser.add_argument('--pretrain-date', type=str, default="1213",
+    parser.add_argument('--pretrain-date', type=str, default="1216",
                         help='预训练模型的日期文件夹（仅resume-training=True时生效）')
-    parser.add_argument('--pretrain-train-id', type=str, default="25",
+    parser.add_argument('--pretrain-train-id', type=str, default="2",
                         help='预训练模型的train_id（仅resume-training=True时生效）')
     parser.add_argument('--pretrain-model-prefix', type=str, 
-                        default="bs64_lr1_ep_373_pool100_freq50_MARL_FROM_SCRATCH_bs64_lr1_MARL_IQL_32x20x2_MAX_R-17",
+                        default="bs64_lr0_ep_445_pool100_freq50_MARL_FROM_SCRATCH_bs64_lr0_MARL_IQL_32x20x2_MAX_R-17",
                         help='预训练模型前缀（仅resume-training=True时生效）')
     
     # 训练超参数（可选，支持命令行覆盖默认值）
-    parser.add_argument('--batch-size', type=int, default=32, help='批大小（默认：32）')
-    parser.add_argument('--lr', type=float, default=1e-4, help='学习率（默认：1e-4）')
+    parser.add_argument('--batch-size', type=int, default=64, help='批大小（默认：64）')
+    parser.add_argument('--lr', type=float, default=5e-5, help='学习率（默认：1e-5）')
     parser.add_argument('--epsilon', type=float, default=0.9, help='探索率（默认：0.9）')
     parser.add_argument('--gamma', type=float, default=0.9, help='折扣因子（默认：0.95）')
-    parser.add_argument('--pool-size', type=int, default=100, help='池大小（默认：50）')
+    parser.add_argument('--pool-size', type=int, default=50, help='池大小（默认：50）')
     parser.add_argument('--episode', type=int, default=1000, help='训练回合数（默认：2000）')
     parser.add_argument('--learn-frequency', type=int, default=50, help='学习频率（默认：50）')
     
@@ -81,7 +81,7 @@ PRETRAIN_MODEL_PREFIX = args.pretrain_model_prefix
 
 # 学习率调度与早停参数
 LR_PATIENCE = 50
-LR_FACTOR = 0.5
+LR_FACTOR = 0.8
 EARLY_STOP_PATIENCE = 1000
 REWARD_THRESHOLD = 0.001
 
@@ -315,6 +315,8 @@ if __name__ == '__main__':
     reward_not_improve_episodes = 0
     training_done = False
     x, y = [], []
+    # 新增：初始化loss记录列表
+    loss_records = []
 
     if REAL_TIME_DRAW:
         plt.ion()
@@ -335,6 +337,8 @@ if __name__ == '__main__':
             'DQN_Learn': 0.0
         }
         step_count = 0
+        # 新增：初始化当前回合的loss（默认0，未学习时保持0）
+        current_loss = 0.0
 
         while True:
             # 动作选择
@@ -363,12 +367,15 @@ if __name__ == '__main__':
             ep_r += r
             step_count += 1
 
-            # 学习过程
+            # 学习过程 - 修复NoneType错误
             if memory_counter[0] > MEMORY_CAPACITY and memory_counter[0] % LEARN_FREQUENCY == 0:
                 time_start_learn = time.time()
-                FC_Agent.learn(0, N_STATES, GAMMA, TARGET_REPLACE_ITER, BATCH_SIZE)
-                Bat_Agent.learn(1, N_STATES, GAMMA, TARGET_REPLACE_ITER, BATCH_SIZE)
-                SC_Agent.learn(2, N_STATES, GAMMA, TARGET_REPLACE_ITER, BATCH_SIZE)
+                # 执行learn并处理None返回值（默认赋值0.0）
+                fc_loss = FC_Agent.learn(0, N_STATES, GAMMA, TARGET_REPLACE_ITER, BATCH_SIZE) or 0.0
+                bat_loss = Bat_Agent.learn(1, N_STATES, GAMMA, TARGET_REPLACE_ITER, BATCH_SIZE) or 0.0
+                sc_loss = SC_Agent.learn(2, N_STATES, GAMMA, TARGET_REPLACE_ITER, BATCH_SIZE) or 0.0
+                # 计算平均loss作为当前回合的loss
+                current_loss = (fc_loss + bat_loss + sc_loss) / 3.0
                 episode_times['DQN_Learn'] += (time.time() - time_start_learn)
 
             if done:
@@ -379,7 +386,11 @@ if __name__ == '__main__':
                     'Ep_r': f'{ep_r:.2f}',
                     'LR': f'{current_lr:.2e}',
                     'Total_Time': f'{using_time_total:.2f}s',
+                    'Loss': f'{current_loss:.4f}'  # 新增：显示当前回合loss
                 })
+
+                # 记录当前回合的loss
+                loss_records.append(current_loss)
 
                 if i_episode < 2 or (i_episode + 1) % 500 == 0:
                     print_time_breakdown(i_episode + 1, episode_times)
@@ -426,27 +437,42 @@ if __name__ == '__main__':
     final_metrics = {
         "max_reward": round(reward_max, 4),
         "final_reward": round(y[-1], 4) if y else 0,
-        "average_reward": round(np.mean(y) if y else 0, 4),
+        # 仅计算剔除前POOL_SIZE个回合后的平均奖励
+        "average_reward": round(np.mean(y[POOL_SIZE:]) if len(y) > POOL_SIZE else 0, 4),
         "total_episodes_completed": final_episode,
         "early_stopped": training_done,
         "final_learning_rate": round(FC_Agent.optimizer.param_groups[0]["lr"], 6),
         "reward_not_improve_episodes": reward_not_improve_episodes,
-        "best_model_reward": round(reward_max, 4)
+        "best_model_reward": round(reward_max, 4),
+        "excluded_episodes": POOL_SIZE  # 标注剔除的回合数
     }
 
     # 保存超参数（包含命令行参数记录）
     save_hyperparameters(base_path, final_metrics)
 
-    # 可视化与保存
+    # 保存训练记录到CSV（包含episode、reward、loss）
+    csv_path = os.path.join(base_path, "training_records.csv")
+    with open(csv_path, 'w', encoding='utf-8') as f:
+        # 写入表头
+        f.write("episode,reward,loss\n")
+        # 写入每一行数据（确保长度一致）
+        for ep, r, l in zip(x, y, loss_records):
+            f.write(f"{ep},{r:.4f},{l:.4f}\n")
+    print(f"✅ 训练记录（含loss）已保存到CSV: {csv_path}")
+
+    # 可视化与保存（剔除前POOL_SIZE个回合的数据）
     writer.flush()
     writer.close()
     plt.figure()
-    plt.plot(x, y)
+    x_filtered = x[POOL_SIZE:]  # 剔除前POOL_SIZE个episode的x值
+    y_filtered = y[POOL_SIZE:]  # 剔除前POOL_SIZE个episode的y值
+    # 绘制过滤后的曲线
+    plt.plot(x_filtered, y_filtered)
     plt.xlabel('Episode')
     plt.ylabel('Episode Reward')
-    plt.title(f'Training Curve (MARL_IQL, Ep={final_episode})')
+    plt.title(f'Training Curve (MARL_IQL, Ep={final_episode}, Exclude First {POOL_SIZE} Episodes)')
     plt.grid(True, linestyle='--', alpha=0.7)
-    plt.savefig(f"{base_path}/train_curve_MARL_IQL_bs{BATCH_SIZE}_lr{int(LR*10000)}_ep{final_episode}.svg")
+    plt.savefig(f"{base_path}/train_curve_MARL_IQL_bs{BATCH_SIZE}_lr{int(LR*10000)}_ep{final_episode}_exclude{POOL_SIZE}ep.svg")
     if REAL_TIME_DRAW:
         plt.ioff()
         plt.show()
@@ -455,7 +481,6 @@ if __name__ == '__main__':
     if best_model_base_name:
         print(f"\n📋 最优模型文件名前缀（直接复制即可）：")
         print(f"{best_model_base_name}")
-
 
     # 执行测试
     test_script_path = os.path.join(project_root, "Scripts", "Chapter3", "test.py")

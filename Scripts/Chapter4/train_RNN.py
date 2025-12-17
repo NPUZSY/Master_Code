@@ -27,12 +27,12 @@ HYPERPARAMETERS = {
     },
     # 训练参数 - 多阶段配置
     'training': {
-        'total_epochs': 5000,   # 总训练轮数
+        'total_epochs': 10000,   # 总训练轮数
         'batch_size': 64,   
         # 多阶段学习率配置
         'lr_schedule': [
             {'epochs': 1000, 'lr': 5e-3}, 
-            {'epochs':5000, 'lr': 1e-3} 
+            {'epochs':9000, 'lr': 1e-3} 
         ],
         'save_path_base': "nets/Chap4/RNN_Reg_Opt_MultiTask", # 区分路径
         # 🚨 新增：多任务损失权重
@@ -63,27 +63,8 @@ if project_root not in sys.path:
     
 print(f"Project root manually added to sys.path: {project_root}")
 
-# --- 依赖导入 ---
-try:
-    from Scripts.Chapter3.MARL_Engine import font_get, get_max_folder_name
-    from Scripts.Env import Envs 
-except ImportError as e:
-    print(f"Warning: Failed to import required project dependencies: {e}")
-    def font_get(): pass
-    def get_max_folder_name(path): return 1
-    class Envs: 
-        def __init__(self):
-            self.step_length = 600
-            self.dt = 1.0
-            self.N_FC_ACTIONS = 3; self.N_BAT_ACTIONS = 3; self.N_SC_ACTIONS = 3
-        def reset(self):
-            self.time_stamp = 0
-            return np.zeros(7 + 3*3, dtype=np.float32)
-        def step(self, action_list):
-            self.time_stamp += 1
-            done = self.time_stamp >= self.step_length
-            obs = np.random.rand(7 + 3*3).astype(np.float32) * 0.1
-            return obs, 0, done, {}
+from Scripts.Chapter3.MARL_Engine import font_get, get_max_folder_name
+from Scripts.Env import Envs
 
 
 # --- ActionValueNet 定义 (保持不变) ---
@@ -127,8 +108,8 @@ font_get()
 # ----------------------------------------------------
 LABEL_MAP = {1: 0, 0: 1, 2: 2, 3: 3} 
 LABEL_REVERSE_MAP = {v: k for k, v in LABEL_MAP.items()}
-TIME_RANGES = [(0, 150), (150, 200), (200, 400), (400, 450), (450, 600)]
-TIME_LABELS = [1, 0, 2, 0, 3]
+TIME_RANGES = [(0, 150), (150, 200), (200, 400), (400, 450), (450, 600), (600, 650), (650, 800)]
+TIME_LABELS = [1, 0, 2, 0, 3, 0, 1]
 
 def index_to_target(index):
     num_classes = HYPERPARAMETERS['mapping']['num_classes']
@@ -187,7 +168,7 @@ def target_to_index(target_value):
 # 绘图函数 (保持不变)
 # ----------------------------------------------------
 def plot_loss(loss_history, accuracy_history, save_dir, lr_schedule):
-    fig_path = os.path.join(save_dir, "RNN_Loss_Accuracy_MultiTask.svg") 
+    fig_path = os.path.join(save_dir, "RNN_Loss_Accuracy_MultiTask.png") 
     fig, ax1 = plt.subplots(figsize=(12, 6))
     
     # --- 绘制 Loss (左 Y 轴) ---
@@ -244,12 +225,12 @@ def plot_loss(loss_history, accuracy_history, save_dir, lr_schedule):
     fig.tight_layout()
     
     os.makedirs(save_dir, exist_ok=True)
-    plt.savefig(fig_path, format='svg', bbox_inches='tight')
+    plt.savefig(fig_path, format='png', dpi=1200)
     plt.close()
     print(f"🖼️ Loss/Accuracy plot saved to: {fig_path}")
 
 def plot_results(time_points, true_target_vals, predicted_continuous_vals, save_dir):
-    fig_path = os.path.join(save_dir, "RNN_Result_MultiTask.svg")
+    fig_path = os.path.join(save_dir, "RNN_Result_MultiTask.png")
     
     predicted_indices = np.array([map_continuous_to_index(v) for v in predicted_continuous_vals.flatten()])
     true_indices = np.array([target_to_index(v) for v in true_target_vals.flatten()])
@@ -280,7 +261,7 @@ def plot_results(time_points, true_target_vals, predicted_continuous_vals, save_
     
     plt.tight_layout()
     os.makedirs(save_dir, exist_ok=True)
-    plt.savefig(fig_path, format='svg', bbox_inches='tight')
+    plt.savefig(fig_path, format='png', dpi=1200)
     plt.close()
     print(f"🖼️ Results plot saved to: {fig_path}")
 

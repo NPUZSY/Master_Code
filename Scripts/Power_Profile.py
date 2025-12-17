@@ -201,7 +201,7 @@ def plot_base_curve(time: np.ndarray,
         # 巡航阶段温度/功率注释
         ax_temp.annotate('', xy=(time[mid_idx], 15), xytext=(time[mid_idx], 15 + 20), arrowprops=arrow_style)
         ax_power.annotate('', xy=(time[mid_idx], 1000 - 200), xytext=(time[mid_idx], 1000 + 200), arrowprops=arrow_style)
-        ax_temp.annotate('25 ± 10°C', xy=(time[mid_idx], 5), fontsize=14)
+        ax_temp.annotate('25 ± 10°C', xy=(time[mid_idx], 10), fontsize=14)
         ax_power.annotate('1000±200W', xy=(time[mid_idx], 1250), fontsize=14)
     except Exception as e:
         print(f"添加注释失败: {e}")
@@ -209,7 +209,7 @@ def plot_base_curve(time: np.ndarray,
     # 保存与显示
     if save_path is not None:
         try:
-            fig.savefig(save_path, bbox_inches='tight', dpi=300)
+            fig.savefig(save_path, bbox_inches='tight', dpi=1200)
         except Exception as e:
             print(f"保存图片失败: {e}")
 
@@ -246,3 +246,4 @@ if __name__ == '__main__':
     
     temps, pows, t = generate_loads(seed=1)
     plot_base_curve(t, temps, pows, save_path="./Figures/Power_Temperature.svg", show=True)
+    plot_base_curve(t, temps, pows, save_path="./Figures/Power_Temperature.png")
