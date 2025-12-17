@@ -40,11 +40,11 @@ def parse_args():
     
     # 训练超参数（可选，支持命令行覆盖默认值）
     parser.add_argument('--batch-size', type=int, default=64, help='批大小（默认：64）')
-    parser.add_argument('--lr', type=float, default=5e-5, help='学习率（默认：1e-5）')
+    parser.add_argument('--lr', type=float, default=1e-5, help='学习率（默认：1e-5）')
     parser.add_argument('--epsilon', type=float, default=0.9, help='探索率（默认：0.9）')
-    parser.add_argument('--gamma', type=float, default=0.9, help='折扣因子（默认：0.95）')
+    parser.add_argument('--gamma', type=float, default=0.95, help='折扣因子（默认：0.95）')
     parser.add_argument('--pool-size', type=int, default=50, help='池大小（默认：50）')
-    parser.add_argument('--episode', type=int, default=1000, help='训练回合数（默认：2000）')
+    parser.add_argument('--episode', type=int, default=5000, help='训练回合数（默认：1000）')
     parser.add_argument('--learn-frequency', type=int, default=50, help='学习频率（默认：50）')
     
     # 路径参数（可选）
@@ -80,7 +80,7 @@ PRETRAIN_TRAIN_ID = args.pretrain_train_id
 PRETRAIN_MODEL_PREFIX = args.pretrain_model_prefix
 
 # 学习率调度与早停参数
-LR_PATIENCE = 50
+LR_PATIENCE = 100
 LR_FACTOR = 0.8
 EARLY_STOP_PATIENCE = 1000
 REWARD_THRESHOLD = 0.001

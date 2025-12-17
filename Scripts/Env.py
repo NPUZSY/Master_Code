@@ -15,6 +15,8 @@ class Envs(gym.Env):
     """
     三源耦合环境（FC + Battery + SuperCap）
     - 适配三智能体 I-DQN 架构的动作输入（现为动作列表）。
+    - 核心修改1：锂电池功率由智能体动作直接决定，超级电容补偿功率差值
+    - 核心修改2：超级电容满充/放空时继续充/放电，按剩余功率的10倍惩罚
     """
 
     def __init__(self):
@@ -42,12 +44,14 @@ class Envs(gym.Env):
         self.w1 = -0.6
         self.w2 = -1.2
         self.w3 = -10
+        # 新增：超级电容过充/过放惩罚权重（功率的10倍）
+        self.w_sc_punish = -10.0
         # 注意：这里的断言是判断 w1+w2+w3 + 1.0 是否接近于 0 (即 w1+w2+w3 约为 -1)
         # 原代码中的断言逻辑存在问题，这里将其简化为检查和是否为负数且非零
         if self.w1 + self.w2 + self.w3 >= 0:
             print("警告：奖励权重之和非负，可能导致训练异常。")
 
-            # -------------------
+        # -------------------
         # 环境工况（载荷 / 温度）
         # -------------------
         # 修正导入路径
@@ -109,6 +113,8 @@ class Envs(gym.Env):
         self.r_fc_accum = 0.0  # FC 超限惩罚累计
         self.punish_step = 1.0  # 每步累积值（可调）
         self.punish_decay = 0.5  # 衰减量（当恢复安全时）
+        # 新增：超级电容过充/过放惩罚累计
+        self.r_sc_punish = 0.0
         self.reset()
 
     # -------------------
@@ -129,7 +135,7 @@ class Envs(gym.Env):
         return float(p)
 
     # -------------------
-    # 重置 (保持不变)
+    # 重置 (保持不变，新增超级电容惩罚重置)
     # -------------------
     def reset(self, **kwargs):
         self.time_stamp = 0
@@ -139,6 +145,8 @@ class Envs(gym.Env):
         self.supercap = SuperCapacitor()
         self.power_fc = 0.0
         self.r_fc_accum = 0.0
+        # 新增：重置超级电容过充/过放惩罚
+        self.r_sc_punish = 0.0
 
         P_load = float(self.loads[0])
         T_env = float(self.temperature[0]) if len(self.temperature) > 0 else 0.0
@@ -157,11 +165,14 @@ class Envs(gym.Env):
         return self.current_observation
 
     # -------------------
-    # STEP (修改为接受动作列表)
+    # STEP (核心修改：锂电池功率由动作直接决定，超级电容补偿差值+过充/过放惩罚)
     # -------------------
     def step(self, action_list):
         """
         action_list: 包含三个动作索引的列表/数组：[a_fc, a_bat, a_sc]
+        核心修改1：锂电池功率(P_bat_final)直接由智能体动作决定（仅做功率上下限约束）
+        核心修改2：超级电容补偿「负载需求 - 燃料电池功率 - 锂电池功率」的功率差值
+        核心修改3：超级电容满充(SOC=1)继续充电/放空(SOC=0)继续放电，按剩余功率10倍惩罚
         """
 
         # 1) 直接从列表读取三个动作索引
@@ -176,58 +187,32 @@ class Envs(gym.Env):
             'sc': a_sc
         }
 
-        # --------------------------------------------------------
-        # 原 step 逻辑开始，使用 action_decoded 代替原 action dict
-        # --------------------------------------------------------
-
         # 当前负载/温度 (使用上一个时刻的 observation)
         P_load = float(self.current_observation[0])
         T_env = float(self.current_observation[1])
 
         # 1) 将动作映射到物理量
         delta_P_fc = self._fc_delta_from_index(action_decoded['fc'])
-        P_bat_cmd = self._bat_power_from_index(action_decoded['bat'])
+        P_bat_cmd = self._bat_power_from_index(action_decoded['bat'])  # 智能体选择的锂电池功率
         sc_on = bool(int(action_decoded['sc']) == 1)
 
         # 2) FC 输出随动作变化（∆P_fc），但受速率与上下限约束
         self.power_fc = float(np.clip(self.power_fc + delta_P_fc, self.P_FC_MIN, self.P_FC_MAX))
 
-        # 3) 初始按动作期望值设定 battery（作为期望），supercap 将尽力补偿残差
-        P_bat_req = float(np.clip(P_bat_cmd, -self.P_BAT_MAX, self.P_BAT_MAX))
+        # 3) 锂电池功率：直接使用智能体动作值（仅做上下限约束）
+        P_bat_final = float(np.clip(P_bat_cmd, -self.P_BAT_MAX, self.P_BAT_MAX))
 
-        # 4) 先尝试用 SC 补偿：计算差值 residual_before_sc = demand - P_fc - P_bat_req
-        residual_before_sc = P_load - self.power_fc - P_bat_req
-
+        # 4) 超级电容补偿功率差值：计算负载需求与 FC+电池 输出的差值
+        power_diff = P_load - self.power_fc - P_bat_final  # 需补偿的功率差值
+        
+        # 超级电容根据开关状态和功率限制补偿差值
         if sc_on:
-            P_sc = float(np.clip(residual_before_sc, -self.P_SC_MAX, self.P_SC_MAX))
+            P_sc = float(np.clip(power_diff, -self.P_SC_MAX, self.P_SC_MAX))  # 补偿差值（受功率限制）
         else:
-            P_sc = 0.0
-
-        # 5) 计算电池最终承担的功率：P_bat_final = demand - P_fc - P_sc
-        P_bat_final = P_load - self.power_fc - P_sc
-
-        # 6) 电池受其最大充放电能力约束，若超出，需要让 SC（若接入）尽量再补偿剩余
-        P_bat_clamped = float(np.clip(P_bat_final, -self.P_BAT_MAX, self.P_BAT_MAX))
-        if abs(P_bat_clamped - P_bat_final) > 1e-6:
-            # 有限制发生
-            mismatch = P_bat_final - P_bat_clamped  # mismatch 为尚未满足的功率（正说明系统仍缺能）
-
-            if sc_on:
-                # 调整 P_sc 来覆盖 mismatch (注意符号)
-                P_sc_extra = float(np.clip(mismatch, -self.P_SC_MAX - P_sc, self.P_SC_MAX - P_sc))
-                P_sc += P_sc_extra
-                # recompute final battery power (should now equal clipped)
-                P_bat_final = P_load - self.power_fc - P_sc
-                P_bat_clamped = float(np.clip(P_bat_final, -self.P_BAT_MAX, self.P_BAT_MAX))
-            # else: 无法补偿，则会存在匹配误差
-
-        # 最终 P_bat 和 P_sc
-        P_bat_final = P_bat_clamped
-        # 最终 SC 功率是残差，受 P_SC_MAX 限制
-        P_sc = float(np.clip(P_load - self.power_fc - P_bat_final, -self.P_SC_MAX, self.P_SC_MAX)) if sc_on else 0.0
+            P_sc = 0.0  # 超级电容关闭时不补偿
 
         # 7) 将最终功率下达到各模块，更新模块状态
-        # Battery: 使用其 work 接口
+        # Battery: 使用其 work 接口（传入智能体选定的功率）
         try:
             work_ret = self.battery.work(P_bat_final)
             if isinstance(work_ret, tuple) or isinstance(work_ret, list):
@@ -253,7 +238,7 @@ class Envs(gym.Env):
             except Exception:
                 soc_diff, soc_err, actual_bat_power = 0.0, 0.0, P_bat_final
 
-        # Supercap: 调用 output 接口
+        # Supercap: 调用 output 接口（传入补偿的功率值）
         try:
             i_sc, v_sc, soc_sc, actual_p_sc = self.supercap.output(P_sc)
         except Exception:
@@ -266,6 +251,24 @@ class Envs(gym.Env):
                     soc_sc = 0.5
             except Exception:
                 soc_sc = 0.5
+
+        # ----------------------------
+        # 新增：超级电容过充/过放惩罚计算
+        # ----------------------------
+        # 重置当前步惩罚
+        current_sc_punish = 0.0
+        # 获取超级电容SOC（限制在0~1范围）
+        soc_sc_clamped = np.clip(soc_sc, 0.0, 1.0)
+        # P_sc > 0: 超级电容放电；P_sc < 0: 超级电容充电
+        if sc_on:
+            # 情况1：SOC=1 且 继续充电（P_sc < 0）
+            if np.isclose(soc_sc_clamped, 1.0) and P_sc < 0:
+                current_sc_punish = abs(P_sc) * abs(self.w_sc_punish)
+            # 情况2：SOC=0 且 继续放电（P_sc > 0）
+            elif np.isclose(soc_sc_clamped, 0.0) and P_sc > 0:
+                current_sc_punish = abs(P_sc) * abs(self.w_sc_punish)
+        # 累计惩罚
+        self.r_sc_punish += current_sc_punish
 
         # Fuel cell: FC 消耗和效率估计
         P_fc = float(self.power_fc)
@@ -318,25 +321,28 @@ class Envs(gym.Env):
             r_bat = 1.0  # 固定惩罚值
         else:
             r_bat = 0.0
+        
+        # 偏离0.6的惩罚
+        r_bat += abs(soc_b - 0.6) * 5
 
         # ----------------------------
-        # 匹配误差
+        # 匹配误差（保持原有逻辑）
         # ----------------------------
-        # 计算供需差值（应接近于 0）
-        # power_mismatch = P_load - P_fc - actual_bat_power - actual_p_sc
-        # r_match = abs(power_mismatch)
-
-        # 与论文对应，超级电容功率就是不匹配功率
-        r_match = abs(actual_p_sc)
+        # 完全没匹配上的功率和又超级电容补充的功率
+        r_match = abs(P_load - self.power_fc - P_bat_final)
 
         # ----------------------------
-        # 总奖励
+        # 总奖励（新增超级电容过充/过放惩罚项）
         # ----------------------------
-        # reward 越大越好，由于权重 w1, w2, w3 都是负的，所以 (C_fc + C_bat), (r_fc + r_bat), r_match 都是惩罚项
-        reward = float(self.w1 * (C_fc + C_bat) + self.w2 * (r_fc + r_bat) + self.w3 * r_match)
+        reward = float(
+            self.w1 * (C_fc + C_bat) + 
+            self.w2 * (r_fc + r_bat) + 
+            self.w3 * r_match - 
+            current_sc_punish  # 减去当前步超级电容惩罚（惩罚值为正，故用减号）
+        )
 
         # ----------------------------
-        # 时间推进与终止
+        # 时间推进与终止（保持原有逻辑）
         # ----------------------------
         self.time_stamp += 1
         done = bool(self.time_stamp >= len(self.loads) - 1)
@@ -360,7 +366,7 @@ class Envs(gym.Env):
             soc_sc
         ], dtype=np.float32)
 
-        # info for logging
+        # info for logging（新增超级电容惩罚相关字段）
         info = {
             "P_load": P_load,
             "P_fc": P_fc,
@@ -371,7 +377,12 @@ class Envs(gym.Env):
             "r_fc": r_fc,
             "r_bat": r_bat,
             "r_match": r_match,
-            "eta_fc": eta_fc
+            "eta_fc": eta_fc,
+            "power_diff": power_diff,
+            # 新增字段
+            "soc_sc": soc_sc_clamped,
+            "current_sc_punish": current_sc_punish,
+            "total_sc_punish": self.r_sc_punish
         }
 
         return self.current_observation, reward, done, info
@@ -424,9 +435,9 @@ if __name__ == "__main__":
 
         total_step_time += (step_end_time - step_start_time)
 
-        # 仅打印前几步的详细信息
+        # 仅打印前几步的详细信息（新增超级电容惩罚信息）
         if t < 5:
-            print(f"Step {t}: Action={action_list}, Reward={r:.4f}, P_fc={info.get('P_fc'):.2f} W, SOC_B={s[-2]:.4f}")
+            print(f"Step {t}: Action={action_list}, Reward={r:.4f}, P_fc={info.get('P_fc'):.2f} W, P_bat={info.get('P_bat'):.2f} W, P_sc={info.get('P_sc'):.2f} W, SOC_B={s[-2]:.4f}, SOC_SC={info.get('soc_sc'):.4f}, SC_Punish={info.get('current_sc_punish'):.2f}")
 
         if d:
             break
@@ -447,6 +458,6 @@ if __name__ == "__main__":
     print(f"1. Total Steps Tested: {num_executed_steps}")
     print(f"2. Total Test Duration: {total_duration:.2f} seconds")
     print(f"3. ⚡️ Average Time per Step: {avg_step_time * 1000:.2f} ms")
-    print(
-        f"4. ⏳ Estimated Episode Time (Full {env.step_length} Steps): {estimated_episode_time_s:.2f} seconds ({estimated_episode_time_s / 60:.2f} minutes)")
+    print(f"4. ⏳ Estimated Episode Time (Full {env.step_length} Steps): {estimated_episode_time_s:.2f} seconds ({estimated_episode_time_s / 60:.2f} minutes)")
+    print(f"5. 🔋 Total SuperCap Punish: {env.r_sc_punish:.2f}")
     print("=" * 40)

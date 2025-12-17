@@ -35,7 +35,7 @@ from train_RNN import (
 HYPERPARAMETERS = TRAIN_HYPERPARAMETERS
 
 # 路径配置（请修改为你的模型路径）
-BASE_PATH = "nets/Chap4/RNN_Reg_Opt_MultiTask/1216/17/"
+BASE_PATH = "nets/Chap4/RNN_Reg_Opt_MultiTask/1217/17/"
 MODEL_PATH = BASE_PATH + "rnn_classifier_multitask.pth"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

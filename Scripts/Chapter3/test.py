@@ -28,7 +28,7 @@ def parse_args():
                         help='模型前缀（必填，如：bs64_lr1_ep_315_pool50_freq50_MARL_MARL_IQL_32x20x2_MAX_R-54）')
     
     # 可选配置参数
-    parser.add_argument('--seed', type=int, default=0, help='随机种子（默认：0）')
+    parser.add_argument('--seed', type=int, default=42, help='随机种子（默认：0）')
     parser.add_argument('--max-time', type=float, default=800.0, help='最大测试时长（秒，默认：800）')
     parser.add_argument('--sc-threshold', type=float, default=1e-3, help='超级电容非活跃阈值（默认：1e-3）')
     parser.add_argument('--show-plot', action='store_true', help='是否显示测试结果图（默认：仅保存不显示）')
@@ -149,6 +149,8 @@ if __name__ == '__main__':
 
         # 环境交互
         t_env0 = time.time()
+        if step > 500:
+            pass
         s_, r, done, info = env.step(action_list)
         env_time = time.time() - t_env0
 
