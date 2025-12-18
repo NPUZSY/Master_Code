@@ -41,11 +41,12 @@ class Envs(gym.Env):
         # -------------------
         # 奖励权重
         # -------------------
-        self.w1 = -0.1
-        self.w2 = -1.2
+        self.w1 = -0.01
+        self.w2 = -1
         self.w3 = -10
         # 新增：超级电容过充/过放惩罚权重（功率的10倍）
-        self.w_sc_punish = -10.0
+        self.w_sc_punish = 10
+        self.minmatch_punish = 10
         # 注意：这里的断言是判断 w1+w2+w3 + 1.0 是否接近于 0 (即 w1+w2+w3 约为 -1)
         # 原代码中的断言逻辑存在问题，这里将其简化为检查和是否为负数且非零
         if self.w1 + self.w2 + self.w3 >= 0:
@@ -263,10 +264,10 @@ class Envs(gym.Env):
         if sc_on:
             # 情况1：SOC=1 且 继续充电（P_sc < 0）
             if np.isclose(soc_sc_clamped, 1.0) and P_sc < 0:
-                current_sc_punish = abs(P_sc) * abs(self.w_sc_punish)
+                current_sc_punish = abs(P_sc) * self.w_sc_punish
             # 情况2：SOC=0 且 继续放电（P_sc > 0）
             elif np.isclose(soc_sc_clamped, 0.0) and P_sc > 0:
-                current_sc_punish = abs(P_sc) * abs(self.w_sc_punish)
+                current_sc_punish = abs(P_sc) * self.w_sc_punish
         # 累计惩罚
         self.r_sc_punish += current_sc_punish
 
@@ -323,20 +324,21 @@ class Envs(gym.Env):
             r_bat = 0.0
         
         # 偏离0.6的惩罚
-        r_bat += abs(soc_b - 0.6) * 5
+        r_bat += abs(soc_b - 0.6) * 10
 
         # ----------------------------
         # 匹配误差（保持原有逻辑）
         # ----------------------------
         # 完全没匹配上的功率和又超级电容补充的功率
-        r_match = abs(P_load - self.power_fc - P_bat_final) + current_sc_punish
+        r_mismatch = abs(P_load - self.power_fc - P_bat_final - actual_p_sc)  * self.minmatch_punish
+        r_match = abs(P_load - self.power_fc - P_bat_final) + current_sc_punish + r_mismatch
 
         # ----------------------------
         # 总奖励（新增超级电容过充/过放惩罚项）
         # ----------------------------
         reward = float(
             self.w1 * (C_fc + C_bat) + 
-            self.w2 * (r_fc + r_bat) + 
+            self.w2 * (r_fc + r_bat * 5) + 
             self.w3 * r_match
         ) / self.step_length
 

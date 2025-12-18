@@ -32,20 +32,20 @@ def parse_args():
                         help='是否基于已有模型继续训练（默认：从头训练）')
     parser.add_argument('--pretrain-date', type=str, default="1217",
                         help='预训练模型的日期文件夹（仅resume-training=True时生效）')
-    parser.add_argument('--pretrain-train-id', type=str, default="27",
+    parser.add_argument('--pretrain-train-id', type=str, default="37",
                         help='预训练模型的train_id（仅resume-training=True时生效）')
     parser.add_argument('--pretrain-model-prefix', type=str, 
-                        default="bs32_lr1_ep_1914_pool100_freq50_MARL_FROM_SCRATCH_bs32_lr1_MARL_IQL_32x20x2_MAX_R-923",
+                        default="MARL_Model",  # 简化预训练模型前缀
                         help='预训练模型前缀（仅resume-training=True时生效）')
     
     # 训练超参数（可选，支持命令行覆盖默认值）
-    parser.add_argument('--batch-size', type=int, default=32, help='批大小（默认：64）')
-    parser.add_argument('--lr', type=float, default=1e-5, help='学习率（默认：1e-5）')
+    parser.add_argument('--batch-size', type=int, default=32, help='批大小（默认：32）')
+    parser.add_argument('--lr', type=float, default=1e-4, help='学习率（默认：1e-5）')
     parser.add_argument('--epsilon', type=float, default=0.9, help='探索率（默认：0.9）')
     parser.add_argument('--gamma', type=float, default=0.95, help='折扣因子（默认：0.95）')
-    parser.add_argument('--pool-size', type=int, default=100, help='池大小（默认：50）')
-    parser.add_argument('--episode', type=int, default=5000, help='训练回合数（默认：1000）')
-    parser.add_argument('--learn-frequency', type=int, default=5000, help='学习频率（默认：50）')
+    parser.add_argument('--pool-size', type=int, default=50, help='池大小（默认：50）')
+    parser.add_argument('--episode', type=int, default=2000, help='训练回合数（默认：1000）')
+    parser.add_argument('--learn-frequency', type=int, default=5, help='学习频率（默认：50）')
     
     # 路径参数（可选）
     parser.add_argument('--log-dir', type=str, default=None, help='TensorBoard日志目录（默认：自动生成）')
@@ -99,24 +99,19 @@ local_time = time.localtime(current_timestamp)
 execute_date = time.strftime("%m%d", local_time)
 execute_time = time.strftime("%H%M%S", local_time)  # 新增：记录具体时间
 
-# ====================== 动态生成remark（包含命令行参数信息） ======================
-if RESUME_TRAINING:
-    # 继续训练时，remark标记基础模型信息和命令行参数
-    remark = f"RESUME_{PRETRAIN_MODEL_PREFIX}_bs{BATCH_SIZE}_lr{int(LR*10000)}_MARL_IQL_32x20x2"
-else:
-    # 从头训练时，remark包含超参数信息
-    remark = f"FROM_SCRATCH_bs{BATCH_SIZE}_lr{int(LR*10000)}_MARL_IQL_32x20x2"
+# ====================== 先初始化remark（后续在main中更新） ======================
+remark = ""
 # =====================================================================
 
-# 新增：全局变量存储最优模型文件名
-best_model_base_name = ""
+# 新增：全局变量存储最优模型文件名（简化为固定前缀）
+best_model_base_name = "MARL_Model"
 
 # 验证动作分解
 N_EXPECTED_ACTIONS = N_FC_ACTIONS * N_BAT_ACTIONS * N_SC_ACTIONS
 if N_EXPECTED_ACTIONS != N_TOTAL_ACTIONS:
     print(f"警告：动作分解 {N_EXPECTED_ACTIONS} 与环境 N_TOTAL_ACTIONS({N_TOTAL_ACTIONS}) 不匹配")
 
-# 新增：定义保存超参数的函数（新增命令行参数记录）
+# 新增：定义保存超参数的函数（适配简化的模型名称）
 def save_hyperparameters(save_path, final_metrics=None):
     """
     保存超参数到指定路径（txt和json格式）
@@ -223,14 +218,14 @@ def print_time_breakdown(episode, episode_times):
         print(f"| {name.ljust(15)} | {time_val:9.4f} s | {percentage:6.2f} % |")
     print("=" * 45)
 
-# ====================== 加载预训练模型函数（保持不变） ======================
+# ====================== 加载预训练模型函数（适配简化的模型名称） ======================
 def load_pretrained_models(agents, pretrain_date, pretrain_train_id, model_prefix):
     """
     加载预训练模型到智能体
     :param agents: 智能体列表 [FC_Agent, Bat_Agent, SC_Agent]
     :param pretrain_date: 预训练模型的日期文件夹
     :param pretrain_train_id: 预训练模型的train_id
-    :param model_prefix: 预训练模型前缀
+    :param model_prefix: 预训练模型前缀（简化为MARL_Model）
     """
     pretrain_base_dir = os.path.join(project_root, "nets", "Chap3", pretrain_date, pretrain_train_id)
     model_paths = {
@@ -278,6 +273,13 @@ if __name__ == '__main__':
     train_id = get_max_folder_name(TARGET_BASE_DIR)
     base_path = f"{TARGET_BASE_DIR}/{train_id}"
     os.makedirs(base_path)
+
+    # ====================== 在train_id定义后更新remark ======================
+    if RESUME_TRAINING:
+        remark = f"RESUME_{execute_date}_{train_id}"  # 简化remark
+    else:
+        remark = f"MARL_{execute_date}_{train_id}"     # 简化remark
+    # =====================================================================
 
     # 共享内存初始化
     MEMORY_WIDTH = N_STATES * 2 + 4
@@ -401,16 +403,14 @@ if __name__ == '__main__':
         x.append(i_episode)
         y.append(ep_r)
 
-        # 模型保存与早停逻辑
+        # 模型保存与早停逻辑（简化模型名称）
         if ep_r > reward_max + REWARD_THRESHOLD:
             reward_max = ep_r
             reward_not_improve_episodes = 0
-            best_model_base_name = (f"bs{BATCH_SIZE}_lr{int(LR*10000)}_ep_{i_episode+1}"
-                                   f"_pool{POOL_SIZE}_freq{LEARN_FREQUENCY}_MARL_{remark}_MAX_R{int(reward_max)}")
-            net_name_base = best_model_base_name
-            torch.save(FC_Agent.eval_net.state_dict(), f"{base_path}/{net_name_base}_FC.pth")
-            torch.save(Bat_Agent.eval_net.state_dict(), f"{base_path}/{net_name_base}_BAT.pth")
-            torch.save(SC_Agent.eval_net.state_dict(), f"{base_path}/{net_name_base}_SC.pth")
+            # 简化模型名称：仅保留固定前缀+智能体类型
+            torch.save(FC_Agent.eval_net.state_dict(), f"{base_path}/{best_model_base_name}_FC.pth")
+            torch.save(Bat_Agent.eval_net.state_dict(), f"{base_path}/{best_model_base_name}_BAT.pth")
+            torch.save(SC_Agent.eval_net.state_dict(), f"{base_path}/{best_model_base_name}_SC.pth")
             print(f"\n--- New Max Reward: {reward_max:.2f} ---")
         else:
             reward_not_improve_episodes += 1
@@ -424,14 +424,13 @@ if __name__ == '__main__':
             print(f"\n--- Early Stopping Triggered! ---")
             training_done = True
 
-    # 最终处理
+    # 最终处理（简化最终模型名称）
     final_episode = i_episode + 1 if not training_done else i_episode
-    final_net_name_base = (f"{base_path}/final_bs{BATCH_SIZE}_lr{int(LR*10000)}_ep_{final_episode}_pool{POOL_SIZE}"
-                         f"_freq{LEARN_FREQUENCY}_MARL_{remark}_FINAL")
-    torch.save(FC_Agent.eval_net.state_dict(), f"{final_net_name_base}_FC.pth")
-    torch.save(Bat_Agent.eval_net.state_dict(), f"{final_net_name_base}_BAT.pth")
-    torch.save(SC_Agent.eval_net.state_dict(), f"{final_net_name_base}_SC.pth")
-    print(f"\nFinal models saved: {final_net_name_base}")
+    final_model_name = f"{base_path}/{best_model_base_name}_FINAL"
+    torch.save(FC_Agent.eval_net.state_dict(), f"{final_model_name}_FC.pth")
+    torch.save(Bat_Agent.eval_net.state_dict(), f"{final_model_name}_BAT.pth")
+    torch.save(SC_Agent.eval_net.state_dict(), f"{final_model_name}_SC.pth")
+    print(f"\nFinal models saved: {final_model_name}")
 
     # 整理训练最终指标
     final_metrics = {
@@ -472,7 +471,8 @@ if __name__ == '__main__':
     plt.ylabel('Episode Reward')
     plt.title(f'Training Curve (MARL_IQL, Ep={final_episode}, Exclude First {POOL_SIZE} Episodes)')
     plt.grid(True, linestyle='--', alpha=0.7)
-    plt.savefig(f"{base_path}/train_curve_MARL_IQL_bs{BATCH_SIZE}_lr{int(LR*10000)}_ep{final_episode}_exclude{POOL_SIZE}ep.svg")
+    # 简化可视化文件名
+    plt.savefig(f"{base_path}/train_curve_MARL_Model.svg")
     if REAL_TIME_DRAW:
         plt.ioff()
         plt.show()
@@ -482,7 +482,7 @@ if __name__ == '__main__':
         print(f"\n📋 最优模型文件名前缀（直接复制即可）：")
         print(f"{best_model_base_name}")
 
-    # 执行测试
+    # 执行测试（适配简化的模型名称）
     test_script_path = os.path.join(project_root, "Scripts", "Chapter3", "test.py")
     # 构造测试命令参数
     test_cmd = [
@@ -490,7 +490,7 @@ if __name__ == '__main__':
         str(test_script_path),              # 测试脚本路径（强制转字符串）
         "--net-date", str(execute_date),    # 日期（强制转字符串）
         "--train-id", str(train_id),        # train_id（强制转字符串）
-        "--model-prefix", str(best_model_base_name)  # 模型前缀（强制转字符串）
+        "--model-prefix", str(best_model_base_name)  # 简化后的模型前缀
     ]
     # 执行测试脚本
     print("\n🚀 开始执行测试脚本...")

@@ -24,10 +24,10 @@ def parse_args():
                         help='模型所在的日期文件夹（必填，如：1213）')
     parser.add_argument('--train-id', type=str, required=True,
                         help='模型对应的训练ID（必填，如：11）')
-    parser.add_argument('--model-prefix', type=str, required=True,
-                        help='模型前缀（必填，如：bs64_lr1_ep_315_pool50_freq50_MARL_MARL_IQL_32x20x2_MAX_R-54）')
+    
     
     # 可选配置参数
+    parser.add_argument('--model-prefix', type=str, default="MARL_Model", help='模型前缀')
     parser.add_argument('--seed', type=int, default=42, help='随机种子（默认：0）')
     parser.add_argument('--max-time', type=float, default=800.0, help='最大测试时长（秒，默认：800）')
     parser.add_argument('--sc-threshold', type=float, default=1e-3, help='超级电容非活跃阈值（默认：1e-3）')
@@ -112,6 +112,8 @@ if __name__ == '__main__':
     soc_bat = []
     soc_sc_list = []
     times = []
+    # 新增：存储未匹配功率的列表
+    unmatched_power_list = []
     # 修复1：统一数据长度（去掉[:-1]避免维度不匹配）
     loads = env.loads
     temperature = env.temperature
@@ -124,6 +126,9 @@ if __name__ == '__main__':
     sc_absorb_power_sum = 0.0
     bat_charge_steps = 0
     total_steps = 0
+    # 新增：总未匹配功率初始化
+    total_unmatched_power = 0.0
+    total_unmatched_energy = 0.0  # 未匹配能量（功率×时间）
     episode_times = {
         'Action_Select': 0.0,
         'Env_Step': 0.0,
@@ -158,21 +163,37 @@ if __name__ == '__main__':
         total_fc_H2_g += float(info.get("C_fc_g", 0.0))
         total_bat_H2_g += float(info.get("C_bat_g", 0.0))
         times.append(step * dt)  # 修复2：时间轴基于dt，与Power_Profile对齐
-        power_fc.append(float(s_[2]))
-        battery_power.append(float(s_[3]))
-        power_sc.append(float(s_[4]))
+        current_fc = float(s_[2])
+        current_bat = float(s_[3])
+        current_sc = float(s_[4])
+        power_fc.append(current_fc)
+        battery_power.append(current_bat)
+        power_sc.append(current_sc)
         soc_bat.append(float(s_[5]))
         soc_sc_list.append(float(s_[6]))
 
+        # 新增：计算当前步未匹配功率（负载需求 - 所有电源输出）
+        # 负载需求：loads[step]（当前步的负载功率）
+        # 总输出功率：燃料电池 + 电池 + 超级电容（注意符号：电池/电容放电为正，充电为负）
+        if step < len(loads):
+            load_demand = loads[step]
+            total_supply = current_fc + current_bat + current_sc
+            unmatched_power = load_demand - total_supply
+            unmatched_power_list.append(unmatched_power)
+            # 累加总未匹配功率（绝对值，代表供需失衡的总量）
+            total_unmatched_power += abs(unmatched_power)
+            # 累加未匹配能量（Wh）：|功率| × 时间步长（小时）
+            total_unmatched_energy += abs(unmatched_power) * dt / 3600.0
+
         # 超级电容统计
-        p_sc = float(s_[4])
+        p_sc = current_sc
         if p_sc > 0:
             sc_release_power_sum += p_sc * dt
         elif p_sc < 0:
             sc_absorb_power_sum += (-p_sc) * dt
 
         # 电池充电统计
-        if float(s_[3]) < 0:
+        if current_bat < 0:
             bat_charge_steps += 1
 
         ep_r += r
@@ -195,6 +216,13 @@ if __name__ == '__main__':
             break
         s = s_
         step += 1
+
+    # 新增：计算未匹配功率相关统计
+    avg_unmatched_power = total_unmatched_power / total_steps if total_steps > 0 else 0.0
+    max_unmatched_power = max([abs(p) for p in unmatched_power_list]) if unmatched_power_list else 0.0
+    # 未匹配功率占总负载需求的比例
+    total_load_demand = sum([abs(loads[i]) for i in range(min(total_steps, len(loads)))])
+    unmatched_ratio = (total_unmatched_power / total_load_demand * 100) if total_load_demand > 0 else 0.0
 
     # 结果计算
     total_time = time.time() - time_start
@@ -285,9 +313,9 @@ if __name__ == '__main__':
     print(f"   PNG: {save_path_png}")
 
     # 打印详细结果汇总
-    print("\n" + "="*60)
+    print("\n" + "="*80)
     print("📈 测试结果汇总与分析")
-    print("="*60)
+    print("="*80)
     print(f"【等效氢耗】")
     print(f"  系统总等效氢耗：{total_h2:.6f} g")
     print(f"  ├─ 燃料电池氢耗：{total_fc_H2_g:.6f} g（{fc_h2_ratio*100:.2f}%）")
@@ -302,12 +330,18 @@ if __name__ == '__main__':
     print(f"  释放能量：{sc_release_Wh:.6f} Wh")
     print(f"  吸收能量：{sc_absorb_Wh:.6f} Wh")
     print(f"  未参与比例：{sc_inactive_ratio*100:.2f}%")
+    print(f"\n【功率匹配性能】")  # 新增：未匹配功率统计
+    print(f"  总未匹配功率（绝对值累加）：{total_unmatched_power:.6f} W·步")
+    print(f"  平均未匹配功率：{avg_unmatched_power:.6f} W/步")
+    print(f"  最大单次未匹配功率：{max_unmatched_power:.6f} W")
+    print(f"  总未匹配能量：{total_unmatched_energy:.6f} Wh")
+    print(f"  未匹配功率占总负载比例：{unmatched_ratio:.2f}%")
     print(f"\n【性能指标】")
     print(f"  累积奖励：{ep_r:.2f}")
     print(f"  总测试步数：{total_steps} 步")
     print(f"  总耗时：{total_time:.4f}s")
     print(f"  平均步耗时：{total_time/total_steps:.6f}s/步")
-    print("="*60)
+    print("="*80)
 
     # 显示图像（根据命令行参数控制）
     if args.show_plot:
