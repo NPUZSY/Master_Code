@@ -30,6 +30,19 @@ def data_read_process():
     # 假设数据存储在data数组中，第一列是时间，第二列是温度
     # 数据清洗和转换部分（此处简单示例，可根据实际情况完善）
     data[:, 1] = ((data[:, 1] - 273150) // 1000)  # 假设温度数据从开尔文转换为摄氏度
+    # ========== 新增：温度范围缩放（-80~20 → -20~25） ==========
+    # 原始温度范围
+    old_min = -80
+    old_max = 20
+    # 目标温度范围
+    new_min = -25
+    new_max = 25
+    # 线性缩放公式
+    data[:, 1] = ((data[:, 1] - old_min) / (old_max - old_min)) * (new_max - new_min) + new_min
+    # 可选：限制边界值（防止浮点误差超出范围）
+    data[:, 1] = np.clip(data[:, 1], new_min, new_max)
+    # ==========================================================
+
     min_temp = min(data[:, 1])
     max_temp = max(data[:, 1])
     temp_interval = 1
@@ -202,20 +215,26 @@ def plot_surf(probability_matrix, min_temp, max_temp, num_intervals, temp_interv
         hspace=0.2,
         wspace=0.2
     )
-    cax = fig.add_axes((0.72, 0.2, 0.03, 0.6))
+    cax = fig.add_axes((0.8, 0.25, 0.02, 0.5))  # (x坐标, y坐标, 宽度, 高度)
 
     # 添加颜色条，指定cax参数为新创建的轴对象，同时设置其他参数
     fig.colorbar(surf, cax=cax, shrink=0.5, aspect=5)
 
-    ax.set_xlabel('当前温度/°C')
-    ax.set_ylabel('下一时刻温度/°C')
+    ax.set_xlabel('Current Temperature/°C')
+    ax.set_ylabel('Next Temperature/°C')
     ax.set_zlabel(z_label, labelpad=10)
     ax.set_title(title)
     # 绘制表示温度出现概率的曲线
     x_curve = np.arange(num_intervals) * temp_interval + min_temp
     z_curve = temp_probabilities
     ax.plot(x_curve, [max_temp] * len(x_curve), z_curve, '#FFA500', label='Temperature Transition')
-    ax.legend(fontsize=16)
+    ax.legend(
+        fontsize=16, 
+        loc='upper right', 
+        bbox_to_anchor=(0.98, 1),  # 可根据需要微调这两个值
+        frameon=True,  # 可选：显示图例边框，更清晰
+        borderaxespad=0.1  # 可选：减小图例与锚点的间距
+    )
 
     # 跨平台最大化窗口适配
     manager = plt.get_current_fig_manager()
@@ -240,22 +259,21 @@ if __name__ == '__main__':
 
     # # 移动平均
     # probability_matrix_ = moving_average_smoothing(probability_matrix_, window_size=100)
-    plot_bar(probability_matrix_, min_temp_, num_intervals, temp_interval, 'Transition Times', "Average Data")
+    # plot_bar(probability_matrix_, min_temp_, num_intervals, temp_interval, 'Transition Times', "Average Data")
 
     # 高斯滤波
-    probability_matrix_ = gaussian_filter(probability_matrix_[:, :, 0], sigma=5)[:, :, np.newaxis]
+    probability_matrix_ = gaussian_filter(probability_matrix_[:, :, 0], sigma=2)[:, :, np.newaxis]
     plot_bar(probability_matrix_, min_temp_, num_intervals, temp_interval, 'Transition Times', "Filter Data")
     # 插值
     probability_matrix_, min_temp_, num_intervals_interpolated, temp_interval_new = interpolation(probability_matrix_,
                                                                                                   min_temp_, max_temp_,
                                                                                                   1)
-    plot_bar(probability_matrix_, min_temp_, num_intervals_interpolated, temp_interval, 'Transition Times', "Interpolated Data")
+    # plot_bar(probability_matrix_, min_temp_, num_intervals_interpolated, temp_interval, 'Transition Times', "Interpolated Data")
 
     # 归一化
     probability_matrix_ = normalize(probability_matrix_)
     plot_bar(probability_matrix_, min_temp_, num_intervals_interpolated, temp_interval, 'Transition Probability', "Normalized Data")
 
     plot_surf(probability_matrix_, min_temp_, max_temp_, num_intervals_interpolated, temp_interval_new,
-              temp_probabilities_, '转移概率',
-              "温度转移概率矩阵")
+              temp_probabilities_, 'Transition Probability', "Normalized Data")
     plt.show()
