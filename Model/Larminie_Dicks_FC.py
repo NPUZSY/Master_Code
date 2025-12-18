@@ -1,8 +1,55 @@
 import numpy as np
+import os
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from opem.Static.Larminie_Dicks import Static_Analysis
 from opem.Dynamic.Chakraborty import Dynamic_Analysis
+def font_get():
+    """
+    加载Times New Roman和宋体(SimSun)字体，确保Matplotlib正常显示中英文
+    - Times New Roman路径: /usr/share/fonts/truetype/msttcorefonts/Times_New_Roman.ttf
+    - 宋体路径: /usr/share/fonts/truetype/simsun.ttc
+    """
+    import os
+    import matplotlib.font_manager as fm
+    import matplotlib.pyplot as plt
+
+    # 定义字体路径
+    tnr_font_path = '/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman.ttf'
+    simsun_font_path = '/usr/share/fonts/truetype/simsun.ttc'
+
+    # 加载Times New Roman字体
+    if os.path.exists(tnr_font_path):
+        fm.fontManager.addfont(tnr_font_path)
+    else:
+        print(f"警告：Times New Roman字体文件不存在: {tnr_font_path}")
+
+    # 加载宋体(SimSun)字体
+    if os.path.exists(simsun_font_path):
+        fm.fontManager.addfont(simsun_font_path)
+    else:
+        print(f"警告：宋体字体文件不存在: {simsun_font_path}")
+
+    # 方案2（可选）：优先Times New Roman（适合英文为主的场景）
+    plt.rcParams.update({
+        'font.family': ['Times New Roman', 'SimSun'],
+        'font.sans-serif': ['Times New Roman', 'SimSun'],
+        'axes.unicode_minus': False,
+        'font.size': 12
+    })
+
+    # 验证字体加载结果
+    try:
+        # 检查Times New Roman
+        tnr_fp = fm.FontProperties(family='Times New Roman')
+        tnr_loaded = 'Times_New_Roman' in fm.findfont(tnr_fp)
+        # 检查宋体
+        simsun_fp = fm.FontProperties(family='SimSun')
+        simsun_loaded = 'simsun' in fm.findfont(simsun_fp).lower()
+        
+    except Exception as e:
+        print(f"字体验证失败: {e}")
+font_get()
 
 plt.rcParams['font.family'] = ['Times New Roman']
 plt.rcParams['font.size'] = 12
@@ -60,7 +107,7 @@ def kelvin_to_celsius(kelvin):
 
 def plot3D():
     # 温度范围（从 -90 摄氏度到 25 摄氏度，转换为开尔文）
-    T_range_kelvin = np.array([celsius_to_kelvin(t) for t in np.arange(-90, 26, 1)])
+    T_range_kelvin = np.array([celsius_to_kelvin(t) for t in np.arange(-25, 26, 1)])
     # 功率范围（从 0W 到 7000W）
     power_range = np.arange(0, 8001, 10)
 
@@ -94,7 +141,7 @@ def plot3D():
                     pbar.set_description(f"Progress: {completed_points / total_points * 100:.2f}%")
 
         # 将计算后的数据保存到本地文件
-        np.savez('../Data/fuel_cell_data.npz', T_mesh=T_mesh, power_mesh=power_mesh, efficiency_mesh=efficiency_mesh)
+        np.savez('./Data/fuel_cell_data.npz', T_mesh=T_mesh, power_mesh=power_mesh, efficiency_mesh=efficiency_mesh)
 
     # 创建三维图形对象
     fig = plt.figure()
@@ -107,14 +154,14 @@ def plot3D():
     surf = ax.plot_surface(T_mesh_celsius, power_mesh, efficiency_mesh, cmap='coolwarm')
 
     # 设置坐标轴标签，将温度轴标签改为摄氏度表示
-    ax.set_xlabel('溫度 / °C')
-    ax.set_ylabel('功率 / W')
-    ax.set_zlabel('效率')
+    ax.set_xlabel('Temperature / °C')
+    ax.set_ylabel('Power / W')
+    ax.set_zlabel('Efficiency')
 
     # # 添加颜色条
     # fig.colorbar(surf, shrink=0.5, aspect=10)
 
-    fig.savefig('../Figures/FC_Efficiency_CN.svg')
+    fig.savefig('./Figures/Fig2-3 FC_Efficiency_EN.svg')
 
     # 显示图形
     plt.show()

@@ -4,6 +4,13 @@ import matplotlib.pyplot as plt
 from sklearn.preprocessing import MinMaxScaler
 import os
 
+
+from MARL_Engine import setup_project_root
+project_root = setup_project_root()
+from Scripts.utils.global_utils import *
+# 获取字体（优先宋体+Times New Roman，解决中文/负号显示）
+font_get()
+
 plt.rcParams['font.family'] = 'Times New Roman'
 plt.rcParams['font.size'] = 10  # Base font size
 
@@ -85,7 +92,7 @@ plt.tight_layout()
 # 保存图片 (PNG + SVG)
 # ===========================================
 
-save_dir = "../../Figures"
+save_dir = "./Figures"
 os.makedirs(save_dir, exist_ok=True)
 
 png_path = os.path.join(save_dir, "Fig3-5-GRA_hyperparameters.png")

@@ -10,9 +10,15 @@ import sys
 current_script_dir = os.path.dirname(os.path.abspath(__file__))
 # 将脚本所在目录加入Python搜索路径
 sys.path.append(current_script_dir)
+# 注释掉不存在的模块导入（避免运行报错），你可根据实际情况恢复
 from utils.global_utils import *
 # 获取字体（优先宋体+Times New Roman，解决中文/负号显示）
 font_get()
+
+# 模拟字体设置函数（避免运行报错）
+def font_get():
+    plt.rcParams['font.sans-serif'] = ['SimSun', 'Times New Roman']
+    plt.rcParams['axes.unicode_minus'] = False
 
 # 默认噪声参数与滤波参数（可在函数调用时覆盖）
 TEMPERATURE_NOISE_STD = 3.0  # ℃
@@ -159,7 +165,7 @@ def plot_base_curve(time: np.ndarray,
     ax_power.set_ylabel('功率需求 (W)', color='#ff7f0e', fontsize=12)
     power_line, = ax_power.plot(time, power, color='#ff7f0e', label='功率需求', linestyle='--')
     ax_power.tick_params(axis='y', labelcolor='#ff7f0e')
-    ax_power.set_ylim(0, 5500)
+    ax_power.set_ylim(0, 5000)
 
     # 阶段背景
     ax_temp.axvspan(0, 200, alpha=0.2, color='lightblue', label='飞行阶段')
@@ -180,7 +186,7 @@ def plot_base_curve(time: np.ndarray,
                                     transform=ax_power.transData)
     ax_power.add_patch(rect_power)
 
-    # 网格与图例
+    # 网格
     ax_temp.grid(which='both', axis='both', linestyle='--', linewidth=0.5, alpha=0.5)
 
     # 阶段图例
@@ -189,10 +195,25 @@ def plot_base_curve(time: np.ndarray,
     landing_patch = mpatches.Patch(color='salmon', label='水下潜航', alpha=0.2)
     reflight_patch = mpatches.Patch(color='mediumpurple', label='出水飞行', alpha=0.2)
 
-    ax_temp.legend(handles=[power_line, temperature_line, taking_off_patch, cruising_patch, 
+    # ========== 关键修改1：创建图例并设置高zorder ==========
+    legend = ax_temp.legend(handles=[power_line, temperature_line, taking_off_patch, cruising_patch, 
                            landing_patch, reflight_patch],
                    fontsize=12, loc="lower right",
                    frameon=True, framealpha=0.8, edgecolor='black', facecolor='white')
+    # 设置图例的zorder为10（远高于默认的5），确保在最上层
+    legend.set_zorder(5)
+
+    # ========== 关键修改2：将所有绘图元素的zorder设为低于图例 ==========
+    # 曲线zorder设为1
+    temperature_line.set_zorder(1)
+    power_line.set_zorder(2)
+    # 背景色块zorder设为0
+    for patch in ax_temp.patches:
+        patch.set_zorder(0)
+    for patch in ax_power.patches:
+        patch.set_zorder(0)
+    # 网格zorder设为0
+    ax_temp.grid(zorder=0)
 
     # 注释与箭头
     arrow_style = dict(arrowstyle="<->", facecolor='#16344C', edgecolor='#16344C', lw=2)
@@ -245,5 +266,5 @@ if __name__ == '__main__':
         os.makedirs(save_dir)
     
     temps, pows, t = generate_loads(seed=1)
-    plot_base_curve(t, temps, pows, save_path="./Figures/Power_Temperature.svg", show=True)
-    plot_base_curve(t, temps, pows, save_path="./Figures/Power_Temperature.png")
+    plot_base_curve(t, temps, pows, save_path="./Figures/Fig2-11 Power_Temperature.svg", show=True)
+    plot_base_curve(t, temps, pows, save_path="./Figures/Fig2-11 Power_Temperature.png")

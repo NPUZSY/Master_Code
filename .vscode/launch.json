@@ -9,7 +9,7 @@
             "console": "integratedTerminal",
             "args": [
                 "--net-date", "1218",
-                "--train-id", "2"
+                "--train-id", "26"
 
             ]
         },

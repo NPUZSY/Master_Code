@@ -42,7 +42,7 @@ def parse_args():
 
     # 训练超参数（可选，支持命令行覆盖默认值）
     parser.add_argument('--batch-size', type=int, default=32, help='批大小（默认：32）')
-    parser.add_argument('--lr', type=float, default=5e-5, help='学习率（默认：1e-5）')
+    parser.add_argument('--lr', type=float, default=1e-5, help='学习率（默认：1e-5）')
     parser.add_argument('--epsilon', type=float, default=0.9, help='探索率（默认：0.9）')
     parser.add_argument('--gamma', type=float, default=0.95, help='折扣因子（默认：0.95）')
     parser.add_argument('--pool-size', type=int, default=100, help='池大小（默认：50）')
@@ -84,7 +84,7 @@ PRETRAIN_MODEL_PREFIX = args.pretrain_model_prefix
 GLOBAL_SEED = 42
 
 # 学习率调度与早停参数
-LR_PATIENCE = 200
+LR_PATIENCE = 50
 LR_FACTOR = 0.5
 EARLY_STOP_PATIENCE = 1000
 REWARD_THRESHOLD = 0.001
@@ -225,14 +225,11 @@ def print_time_breakdown(episode, episode_times):
         print(f"| {name.ljust(15)} | {time_val:9.4f} s | {percentage:6.2f} % |")
     print("=" * 45)
 
-# ====================== 加载预训练模型函数（适配简化的模型名称） ======================
-def load_pretrained_models(agents, pretrain_date, pretrain_train_id, model_prefix):
+# ====================== 加载预训练模型函数（完全修复版） ======================
+def load_pretrained_models(agents, pretrain_date, pretrain_train_id, model_prefix, shared_memory, memory_counter):
     """
-    加载预训练模型到智能体
-    :param agents: 智能体列表 [FC_Agent, Bat_Agent, SC_Agent]
-    :param pretrain_date: 预训练模型的日期文件夹
-    :param pretrain_train_id: 预训练模型的train_id
-    :param model_prefix: 预训练模型前缀（简化为MARL_Model）
+    加载预训练模型到智能体（支持逐个检查，交互确认重新初始化/终止训练）
+    返回：更新后的独立智能体实例 + 列表
     """
     pretrain_base_dir = os.path.join(project_root, "nets", "Chap3", pretrain_date, pretrain_train_id)
     model_paths = {
@@ -241,11 +238,20 @@ def load_pretrained_models(agents, pretrain_date, pretrain_train_id, model_prefi
         "SC_Agent": os.path.join(pretrain_base_dir, f"{model_prefix}_SC.pth")
     }
 
+    # 记录缺失的智能体名称
+    missing_agent_names = []
+    existing_agents = []
+
+    # 第一步：检查所有模型文件是否存在
     for agent in agents:
         model_path = model_paths[agent.agent_name]
         if not os.path.exists(model_path):
-            raise FileNotFoundError(f"预训练模型文件不存在: {model_path}")
-        
+            missing_agent_names.append(agent.agent_name)
+        else:
+            existing_agents.append((agent, model_path))
+
+    # 第二步：加载存在的模型
+    for agent, model_path in existing_agents:
         try:
             agent.eval_net.load_state_dict(torch.load(model_path, map_location=device))
             agent.target_net.load_state_dict(agent.eval_net.state_dict())
@@ -253,7 +259,56 @@ def load_pretrained_models(agents, pretrain_date, pretrain_train_id, model_prefi
         except Exception as e:
             raise RuntimeError(f"加载{agent.agent_name}模型失败: {e}")
 
-    print("\n🎉 所有预训练模型加载完成！")
+    # 第三步：处理缺失的模型（交互确认 + 重新初始化）
+    if missing_agent_names:
+        print("\n❌ 以下智能体模型文件未找到：")
+        for idx, agent_name in enumerate(missing_agent_names):
+            print(f"   {idx+1}. {agent_name}: {model_paths[agent_name]}")
+        
+        # 命令行交互确认
+        while True:
+            user_input = input("\n📌 是否重新初始化这些缺失的智能体？(y/n): ").strip().lower()
+            if user_input in ['y', 'yes']:
+                # 重新初始化缺失的智能体（完全复用原有初始化逻辑）
+                for idx, agent in enumerate(agents):
+                    if agent.agent_name in missing_agent_names:
+                        print(f"\n🔄 重新初始化{agent.agent_name}（从0开始）...")
+                        # 核心：和原有初始化代码完全一致
+                        if agent.agent_name == "FC_Agent":
+                            new_agent = IndependentDQN(
+                                "FC_Agent", N_STATES, N_FC_ACTIONS,
+                                shared_memory, memory_counter
+                            )
+                        elif agent.agent_name == "Bat_Agent":
+                            new_agent = IndependentDQN(
+                                "Bat_Agent", N_STATES, N_BAT_ACTIONS,
+                                shared_memory, memory_counter
+                            )
+                        elif agent.agent_name == "SC_Agent":
+                            new_agent = IndependentDQN(
+                                "SC_Agent", N_STATES, N_SC_ACTIONS,
+                                shared_memory, memory_counter
+                            )
+                        # 关键：初始化优化器
+                        new_agent.setup_optimizer(LR, LR_FACTOR, LR_PATIENCE)
+                        # 替换列表中的实例
+                        agents[idx] = new_agent
+                        print(f"✅ {agent.agent_name}已重新初始化完成（含优化器）")
+                break
+            elif user_input in ['n', 'no']:
+                # 终止训练
+                print("\n🛑 用户选择终止训练，退出程序...")
+                sys.exit(0)
+            else:
+                print("⚠️ 输入无效，请输入 y/yes 或 n/no！")
+
+    # 提取独立智能体实例返回
+    fc_agent = next(a for a in agents if a.agent_name == "FC_Agent")
+    bat_agent = next(a for a in agents if a.agent_name == "Bat_Agent")
+    sc_agent = next(a for a in agents if a.agent_name == "SC_Agent")
+    
+    print("\n🎉 预训练模型加载/初始化完成！")
+    return fc_agent, bat_agent, sc_agent, agents
 # =====================================================================
 
 if __name__ == '__main__':
@@ -281,12 +336,11 @@ if __name__ == '__main__':
     base_path = f"{TARGET_BASE_DIR}/{train_id}"
     os.makedirs(base_path)
 
-    # ====================== 在train_id定义后更新remark ======================
+    # 更新remark
     if RESUME_TRAINING:
-        remark = f"RESUME_{execute_date}_{train_id}"  # 简化remark
+        remark = f"RESUME_{execute_date}_{train_id}"
     else:
-        remark = f"MARL_{execute_date}_{train_id}"     # 简化remark
-    # =====================================================================
+        remark = f"MARL_{execute_date}_{train_id}"
 
     # 共享内存初始化
     MEMORY_WIDTH = N_STATES * 2 + 4
@@ -308,14 +362,24 @@ if __name__ == '__main__':
     )
     all_agents = [FC_Agent, Bat_Agent, SC_Agent]
 
-    # 加载预训练模型（从命令行参数判断）
+    # 加载预训练模型（修复：同步全局变量）
     if RESUME_TRAINING:
         print("\n📌 开始加载预训练模型...")
-        load_pretrained_models(all_agents, PRETRAIN_DATE, PRETRAIN_TRAIN_ID, PRETRAIN_MODEL_PREFIX)
+        FC_Agent, Bat_Agent, SC_Agent, all_agents = load_pretrained_models(
+            all_agents, PRETRAIN_DATE, PRETRAIN_TRAIN_ID, PRETRAIN_MODEL_PREFIX,
+            shared_memory, memory_counter
+        )
 
-    # 设置优化器
+    # 设置优化器（避免重复初始化）
     for agent in all_agents:
-        agent.setup_optimizer(LR, LR_FACTOR, LR_PATIENCE)
+        if not hasattr(agent, 'optimizer') or agent.optimizer is None:
+            agent.setup_optimizer(LR, LR_FACTOR, LR_PATIENCE)
+
+    # 验证优化器状态（调试用）
+    print("\n🔍 智能体优化器状态验证:")
+    print(f"FC_Agent: {'✅' if FC_Agent.optimizer else '❌'}")
+    print(f"Bat_Agent: {'✅' if Bat_Agent.optimizer else '❌'}")
+    print(f"SC_Agent: {'✅' if SC_Agent.optimizer else '❌'}")
 
     # 训练过程
     print('\nCollecting experience and learning (I-DQN, 3-Agent)...')
@@ -324,7 +388,6 @@ if __name__ == '__main__':
     reward_not_improve_episodes = 0
     training_done = False
     x, y = [], []
-    # 新增：初始化loss记录列表
     loss_records = []
 
     if REAL_TIME_DRAW:
@@ -346,7 +409,6 @@ if __name__ == '__main__':
             'DQN_Learn': 0.0
         }
         step_count = 0
-        # 新增：初始化当前回合的loss（默认0，未学习时保持0）
         current_loss = 0.0
 
         while True:
@@ -376,14 +438,15 @@ if __name__ == '__main__':
             ep_r += r
             step_count += 1
 
-            # 学习过程 - 修复NoneType错误
+            # 学习过程
             if memory_counter[0] > MEMORY_CAPACITY and memory_counter[0] % LEARN_FREQUENCY == 0:
                 time_start_learn = time.time()
-                # 执行learn并处理None返回值（默认赋值0.0）
                 fc_loss = FC_Agent.learn(0, N_STATES, GAMMA, TARGET_REPLACE_ITER, BATCH_SIZE) or 0.0
                 bat_loss = Bat_Agent.learn(1, N_STATES, GAMMA, TARGET_REPLACE_ITER, BATCH_SIZE) or 0.0
+                # 不学习燃料电池锂电池
+                # fc_loss =  0.0
+                # bat_loss =  0.0
                 sc_loss = SC_Agent.learn(2, N_STATES, GAMMA, TARGET_REPLACE_ITER, BATCH_SIZE) or 0.0
-                # 计算平均loss作为当前回合的loss
                 current_loss = (fc_loss + bat_loss + sc_loss) / 3.0
                 episode_times['DQN_Learn'] += (time.time() - time_start_learn)
 
@@ -395,10 +458,9 @@ if __name__ == '__main__':
                     'Ep_r': f'{ep_r:.2f}',
                     'LR': f'{current_lr:.2e}',
                     'Total_Time': f'{using_time_total:.2f}s',
-                    'Loss': f'{current_loss:.4f}'  # 新增：显示当前回合loss
+                    'Loss': f'{current_loss:.4f}'
                 })
 
-                # 记录当前回合的loss
                 loss_records.append(current_loss)
 
                 if i_episode < 2 or (i_episode + 1) % 500 == 0:
@@ -410,11 +472,10 @@ if __name__ == '__main__':
         x.append(i_episode)
         y.append(ep_r)
 
-        # 模型保存与早停逻辑（简化模型名称）
+        # 模型保存与早停逻辑
         if ep_r > reward_max + REWARD_THRESHOLD:
             reward_max = ep_r
             reward_not_improve_episodes = 0
-            # 简化模型名称：仅保留固定前缀+智能体类型
             torch.save(FC_Agent.eval_net.state_dict(), f"{base_path}/{best_model_base_name}_FC.pth")
             torch.save(Bat_Agent.eval_net.state_dict(), f"{base_path}/{best_model_base_name}_BAT.pth")
             torch.save(SC_Agent.eval_net.state_dict(), f"{base_path}/{best_model_base_name}_SC.pth")
@@ -431,7 +492,7 @@ if __name__ == '__main__':
             print(f"\n--- Early Stopping Triggered! ---")
             training_done = True
 
-    # 最终处理（简化最终模型名称）
+    # 最终处理
     final_episode = i_episode + 1 if not training_done else i_episode
     final_model_name = f"{base_path}/{best_model_base_name}_FINAL"
     torch.save(FC_Agent.eval_net.state_dict(), f"{final_model_name}_FC.pth")
@@ -443,42 +504,37 @@ if __name__ == '__main__':
     final_metrics = {
         "max_reward": round(reward_max, 4),
         "final_reward": round(y[-1], 4) if y else 0,
-        # 仅计算剔除前POOL_SIZE个回合后的平均奖励
         "average_reward": round(np.mean(y[POOL_SIZE:]) if len(y) > POOL_SIZE else 0, 4),
         "total_episodes_completed": final_episode,
         "early_stopped": training_done,
         "final_learning_rate": round(FC_Agent.optimizer.param_groups[0]["lr"], 6),
         "reward_not_improve_episodes": reward_not_improve_episodes,
         "best_model_reward": round(reward_max, 4),
-        "excluded_episodes": POOL_SIZE  # 标注剔除的回合数
+        "excluded_episodes": POOL_SIZE
     }
 
-    # 保存超参数（包含命令行参数记录）
+    # 保存超参数
     save_hyperparameters(base_path, final_metrics)
 
-    # 保存训练记录到CSV（包含episode、reward、loss）
+    # 保存训练记录到CSV
     csv_path = os.path.join(base_path, "training_records.csv")
     with open(csv_path, 'w', encoding='utf-8') as f:
-        # 写入表头
         f.write("episode,reward,loss\n")
-        # 写入每一行数据（确保长度一致）
         for ep, r, l in zip(x, y, loss_records):
             f.write(f"{ep},{r:.4f},{l:.4f}\n")
     print(f"✅ 训练记录（含loss）已保存到CSV: {csv_path}")
 
-    # 可视化与保存（剔除前POOL_SIZE个回合的数据）
+    # 可视化与保存
     writer.flush()
     writer.close()
     plt.figure()
-    x_filtered = x[POOL_SIZE:]  # 剔除前POOL_SIZE个episode的x值
-    y_filtered = y[POOL_SIZE:]  # 剔除前POOL_SIZE个episode的y值
-    # 绘制过滤后的曲线
+    x_filtered = x[POOL_SIZE:]
+    y_filtered = y[POOL_SIZE:]
     plt.plot(x_filtered, y_filtered)
     plt.xlabel('Episode')
     plt.ylabel('Episode Reward')
     plt.title(f'Training Curve (MARL_IQL, Ep={final_episode}, Exclude First {POOL_SIZE} Episodes)')
     plt.grid(True, linestyle='--', alpha=0.7)
-    # 简化可视化文件名
     plt.savefig(f"{base_path}/train_curve_MARL_Model.svg")
     if REAL_TIME_DRAW:
         plt.ioff()
@@ -486,25 +542,19 @@ if __name__ == '__main__':
 
     print(f"\n🎉 训练完成！所有文件已保存到: {base_path}")
     if best_model_base_name:
-        print(f"\n📋 最优模型文件名前缀（直接复制即可）：")
-        print(f"{best_model_base_name}")
+        print(f"\n📋 最优模型文件名前缀：{best_model_base_name}")
 
-    # 执行测试（适配简化的模型名称）
+    # 执行测试
     test_script_path = os.path.join(project_root, "Scripts", "Chapter3", "test.py")
-    # 构造测试命令参数
     test_cmd = [
-        str(sys.executable),                # Python解释器（强制转字符串）
-        str(test_script_path),              # 测试脚本路径（强制转字符串）
-        "--net-date", str(execute_date),    # 日期（强制转字符串）
-        "--train-id", str(train_id),        # train_id（强制转字符串）
-        "--model-prefix", str(best_model_base_name)  # 简化后的模型前缀
+        str(sys.executable),
+        str(test_script_path),
+        "--net-date", str(execute_date),
+        "--train-id", str(train_id),
+        "--model-prefix", str(best_model_base_name)
     ]
-    # 执行测试脚本
     print("\n🚀 开始执行测试脚本...")
     print(test_cmd)
     subprocess.run(test_cmd, check=True)
 
-    print(f"\n🎉 训练完成！所有文件已保存到: {base_path}")
-    if best_model_base_name:
-        print(f"\n📋 最优模型文件名前缀（直接复制即可）：")
-        print(f"{best_model_base_name}")
+    print(f"\n🎉 所有流程完成！文件保存路径: {base_path}")

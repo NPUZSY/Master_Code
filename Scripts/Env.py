@@ -41,9 +41,9 @@ class Envs(gym.Env):
         # -------------------
         # 奖励权重
         # -------------------
-        self.w1 = -0.01
-        self.w2 = -1
-        self.w3 = -10
+        self.w1 = -200
+        self.w2 = -0.1
+        self.w3 = -0.1
         # 新增：超级电容过充/过放惩罚权重（功率的10倍）
         self.w_sc_punish = 10
         self.minmatch_punish = 10
@@ -195,7 +195,9 @@ class Envs(gym.Env):
         # 1) 将动作映射到物理量
         delta_P_fc = self._fc_delta_from_index(action_decoded['fc'])
         P_bat_cmd = self._bat_power_from_index(action_decoded['bat'])  # 智能体选择的锂电池功率
-        sc_on = bool(int(action_decoded['sc']) == 1)
+        sc_on = ~bool(int(action_decoded['sc']) == 1)
+        # print(sc_on)
+        
 
         # 2) FC 输出随动作变化（∆P_fc），但受速率与上下限约束
         self.power_fc = float(np.clip(self.power_fc + delta_P_fc, self.P_FC_MIN, self.P_FC_MAX))
@@ -205,6 +207,8 @@ class Envs(gym.Env):
 
         # 4) 超级电容补偿功率差值：计算负载需求与 FC+电池 输出的差值
         power_diff = P_load - self.power_fc - P_bat_final  # 需补偿的功率差值
+
+        # sc_on = ~(power_diff == 0)
         
         # 超级电容根据开关状态和功率限制补偿差值
         if sc_on:
@@ -324,14 +328,14 @@ class Envs(gym.Env):
             r_bat = 0.0
         
         # 偏离0.6的惩罚
-        r_bat += abs(soc_b - 0.6) * 10
+        r_bat += abs(soc_b - 0.6) * 5
 
         # ----------------------------
         # 匹配误差（保持原有逻辑）
         # ----------------------------
         # 完全没匹配上的功率和又超级电容补充的功率
-        r_mismatch = abs(P_load - self.power_fc - P_bat_final - actual_p_sc)  * self.minmatch_punish
-        r_match = abs(P_load - self.power_fc - P_bat_final) + current_sc_punish + r_mismatch
+        power_loss = abs(P_load - self.power_fc - actual_bat_power - actual_p_sc)  
+        r_match = current_sc_punish + power_loss * self.minmatch_punish
 
         # ----------------------------
         # 总奖励（新增超级电容过充/过放惩罚项）
@@ -340,7 +344,7 @@ class Envs(gym.Env):
             self.w1 * (C_fc + C_bat) + 
             self.w2 * (r_fc + r_bat) + 
             self.w3 * r_match
-        ) / self.step_length
+        ) / self.step_length *10
 
         # ----------------------------
         # 时间推进与终止（保持原有逻辑）

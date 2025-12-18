@@ -47,6 +47,8 @@ def parse_args():
     parser.add_argument('--train-id', type=str, required=True,
                         help='模型对应的训练ID（必填，如：11）')
     
+    # 测试示例脚本python Scripts/Chapter3/test.py --net-date 1218 --train-id 9
+    
     # 可选配置参数
     parser.add_argument('--model-prefix', type=str, default="MARL_Model", help='模型前缀')
     parser.add_argument('--seed', type=int, default=42, help='随机种子（默认：42）')
@@ -354,7 +356,7 @@ if __name__ == '__main__':
 
     # 绘图配置（适配Power_Profile的最新修改）
     plt.rcParams.update({
-        'font.family': ['Times New Roman'],  # 兼容中英文
+        'font.family': ['Times New Roman'],  # 仅使用新罗马字体
         'axes.unicode_minus': False,
         'font.size': 12
     })
@@ -364,15 +366,15 @@ if __name__ == '__main__':
     LINES_ALPHA = 1
     LABEL_FONT_SIZE = 18
 
-    # 绘制结果图
-    fig, ax1 = plt.subplots(figsize=(15, 5))
-    fig.subplots_adjust(top=0.965, bottom=0.125, left=0.085, right=0.875)
-    
     # 修复4：统一数据长度（截断到实际测试步数）
     plot_times = times[:len(power_fc)]
     plot_loads = loads[:len(power_fc)]
     plot_temperature = temperature[:len(power_fc)]
 
+    # ====================== 原有绘图逻辑（保留不变） ======================
+    fig, ax1 = plt.subplots(figsize=(15, 5))
+    fig.subplots_adjust(top=0.965, bottom=0.125, left=0.085, right=0.875)
+    
     # 功率曲线（适配命令行指定的最大时长）
     l1, = ax1.plot(plot_times, plot_loads, label='Power Demand', color=colors[0], alpha=LINES_ALPHA)
     l2, = ax1.plot(plot_times, power_fc, label='Power Fuel Cell', color=colors[1], alpha=LINES_ALPHA)
@@ -424,9 +426,127 @@ if __name__ == '__main__':
     plt.savefig(save_path_svg, bbox_inches='tight', dpi=1200)
     plt.savefig(save_path_png, dpi=1200, bbox_inches='tight')
     
-    print(f"\n📊 测试结果图已保存:")
+    print(f"\n📊 原始测试结果图已保存:")
     print(f"   SVG: {save_path_svg}")
     print(f"   PNG: {save_path_png}")
+
+    # ====================== 新增：拆分绘制三幅图并保存到multi_figures子目录 ======================
+    # 创建multi_figures子目录
+    multi_fig_dir = os.path.join(SAVE_DIR, "multi_figures")
+    os.makedirs(multi_fig_dir, exist_ok=True)
+    
+    # 绘图通用配置
+    fig_size = (15, 6)
+    dpi_val = 1200
+    grid_style = {'linestyle': '--', 'linewidth': 0.5, 'alpha': 0.5}
+    
+    # 1. 第一幅图：功率需求和燃料电池输出功率
+    fig1, ax1_1 = plt.subplots(figsize=fig_size)
+    fig1.subplots_adjust(top=0.95, bottom=0.15, left=0.08, right=0.95)
+    
+    # 绘制曲线
+    ax1_1.plot(plot_times, plot_loads, label='Power Demand', color='#3570a8', alpha=LINES_ALPHA, linewidth=1.5)
+    ax1_1.plot(plot_times, power_fc, label='Fuel Cell Power', color='#f09639', alpha=LINES_ALPHA, linewidth=1.5)
+
+    # ========== 新增：温度曲线（右轴） ==========
+    ax1_2 = ax1_1.twinx()  # 创建右侧Y轴
+    # 绘制温度曲线
+    ax1_2.plot(plot_times, plot_temperature, label='Temperature', color='#8a7ab5', alpha=LINES_ALPHA, linewidth=1.5)
+    # 配置温度轴
+    ax1_2.set_ylabel('Temperature/°C', fontsize=LABEL_FONT_SIZE)
+    ax1_2.tick_params(axis='y', labelsize=LABEL_FONT_SIZE-2)
+    ax1_2.set_ylim(-25, 40)  # 温度范围和原代码保持一致
+    # ==========================================
+    
+    # 配置坐标轴
+    ax1_1.set_xlabel('Time/s', fontsize=LABEL_FONT_SIZE)
+    ax1_1.set_ylabel('Power/W', fontsize=LABEL_FONT_SIZE)
+    ax1_1.tick_params(axis='both', labelsize=LABEL_FONT_SIZE-2)
+    ax1_1.set_xlim(0, args.max_time)
+    ax1_1.set_ylim(-2500, 5500)
+    ax1_1.grid(**grid_style)
+    
+    # 图例
+    lines1, labels1 = ax1_1.get_legend_handles_labels()
+    lines2, labels2 = ax1_2.get_legend_handles_labels()
+    ax1_1.legend(lines1 + lines2, labels1 + labels2, loc='upper right', fontsize=LABEL_FONT_SIZE-2, framealpha=0.9)
+    # ======================================================
+    
+    # 保存图片
+    fig1.savefig(os.path.join(multi_fig_dir, f"{args.model_prefix}_FC_Power.svg"), 
+                bbox_inches='tight', dpi=dpi_val)
+    fig1.savefig(os.path.join(multi_fig_dir, f"{args.model_prefix}_FC_Power.png"), 
+                dpi=dpi_val, bbox_inches='tight')
+    plt.close(fig1)
+    
+    # 2. 第二幅图：锂电池输出功率和锂电池SOC
+    fig2, ax2_1 = plt.subplots(figsize=fig_size)
+    fig2.subplots_adjust(top=0.95, bottom=0.15, left=0.08, right=0.95)
+    
+    # 功率轴（左）
+    ax2_1.plot(plot_times, battery_power, label='Battery Power', color='#42985e', alpha=LINES_ALPHA, linewidth=1.5)
+    ax2_1.set_xlabel('Time/s', fontsize=LABEL_FONT_SIZE)
+    ax2_1.set_ylabel('Power/W', fontsize=LABEL_FONT_SIZE)
+    ax2_1.tick_params(axis='both', labelsize=LABEL_FONT_SIZE-2)
+    ax2_1.set_xlim(0, args.max_time)
+    ax2_1.set_ylim(-2500, 5500)
+    ax2_1.grid(**grid_style)
+    
+    # SOC轴（右）
+    ax2_2 = ax2_1.twinx()
+    ax2_2.plot(plot_times, soc_bat, label='Battery SOC', color='#c84343', alpha=LINES_ALPHA, linewidth=1.5)
+    ax2_2.set_ylabel('SOC', fontsize=LABEL_FONT_SIZE)
+    ax2_2.tick_params(axis='y', labelsize=LABEL_FONT_SIZE-2)
+    ax2_2.set_ylim(0, 1.0)
+    
+    # 合并图例
+    lines1, labels1 = ax2_1.get_legend_handles_labels()
+    lines2, labels2 = ax2_2.get_legend_handles_labels()
+    ax2_1.legend(lines1 + lines2, labels1 + labels2, loc='upper right', fontsize=LABEL_FONT_SIZE-2, framealpha=0.9)
+    
+    # 保存图片
+    fig2.savefig(os.path.join(multi_fig_dir, f"{args.model_prefix}_BAT_Power_SOC.svg"), 
+                bbox_inches='tight', dpi=dpi_val)
+    fig2.savefig(os.path.join(multi_fig_dir, f"{args.model_prefix}_BAT_Power_SOC.png"), 
+                dpi=dpi_val, bbox_inches='tight')
+    plt.close(fig2)
+    
+    # 3. 第三幅图：超级电容输出功率和超级电容SOC
+    fig3, ax3_1 = plt.subplots(figsize=fig_size)
+    fig3.subplots_adjust(top=0.95, bottom=0.15, left=0.08, right=0.95)
+    
+    # 功率轴（左）
+    ax3_1.plot(plot_times, power_sc, label='SuperCap Power', color='black', linestyle='--', alpha=LINES_ALPHA, linewidth=1.5)
+    ax3_1.set_xlabel('Time/s', fontsize=LABEL_FONT_SIZE)
+    ax3_1.set_ylabel('Power/W', fontsize=LABEL_FONT_SIZE)
+    ax3_1.tick_params(axis='both', labelsize=LABEL_FONT_SIZE-2)
+    ax3_1.set_xlim(0, args.max_time)
+    ax3_1.set_ylim(-2500, 5500)
+    ax3_1.grid(**grid_style)
+    
+    # SOC轴（右）
+    ax3_2 = ax3_1.twinx()
+    ax3_2.plot(plot_times, soc_sc_list, label='SuperCap SOC', color='grey', linestyle=':', alpha=LINES_ALPHA, linewidth=1.5)
+    ax3_2.set_ylabel('SOC', fontsize=LABEL_FONT_SIZE)
+    ax3_2.tick_params(axis='y', labelsize=LABEL_FONT_SIZE-2)
+    ax3_2.set_ylim(0, 1.0)
+    
+    # 合并图例
+    lines1, labels1 = ax3_1.get_legend_handles_labels()
+    lines2, labels2 = ax3_2.get_legend_handles_labels()
+    ax3_1.legend(lines1 + lines2, labels1 + labels2, loc='upper right', fontsize=LABEL_FONT_SIZE-2, framealpha=0.9)
+    
+    # 保存图片
+    fig3.savefig(os.path.join(multi_fig_dir, f"{args.model_prefix}_SC_Power_SOC.svg"), 
+                bbox_inches='tight', dpi=dpi_val)
+    fig3.savefig(os.path.join(multi_fig_dir, f"{args.model_prefix}_SC_Power_SOC.png"), 
+                dpi=dpi_val, bbox_inches='tight')
+    plt.close(fig3)
+    
+    print(f"\n📊 拆分的三幅图已保存到 {multi_fig_dir}:")
+    print(f"   1. FC_Power.svg/png (功率需求+燃料电池功率)")
+    print(f"   2. BAT_Power_SOC.svg/png (锂电池功率+锂电池SOC)")
+    print(f"   3. SC_Power_SOC.svg/png (超级电容功率+超级电容SOC)")
 
     # ====================== 保存JSON格式测试结果（使用自定义编码器） ======================
     json_save_path = os.path.join(SAVE_DIR, f"{args.model_prefix}_Test_Results.json")
@@ -476,4 +596,5 @@ if __name__ == '__main__':
     
     print(f"\n✅ 测试完成！所有结果已保存至：{SAVE_DIR}")
     print(f"   📄 JSON结果文件：{json_save_path}")
-    print(f"   📊 可视化文件：{save_path_svg} / {save_path_png}")
+    print(f"   📊 原始可视化文件：{save_path_svg} / {save_path_png}")
+    print(f"   📊 拆分图表文件：{multi_fig_dir}")

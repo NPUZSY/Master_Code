@@ -10,11 +10,11 @@ class SuperCapacitor:
     """
 
     def __init__(self,
-                 voltage_init=36.0,  # 初始电压（V）
+                 voltage_init=270.0,  # 初始电压（V）
                  capacitance=50.0,  # 电容（F） 论文数值：几十 F 级
                  esr=0.08,  # 等效串联电阻 ESR（Ohm）
-                 v_min=24.0,  # 最低工作电压（V）
-                 v_max=48.0,  # 最高工作电压（V）
+                 v_min=250.0,  # 最低工作电压（V）
+                 v_max=290.0,  # 最高工作电压（V）
                  time_step=1.0):  # ❗ 优化: 将时间步长（秒）设置为 1.0s，与环境步长对齐
 
         self.C = capacitance
