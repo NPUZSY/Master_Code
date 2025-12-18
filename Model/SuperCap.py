@@ -10,7 +10,7 @@ class SuperCapacitor:
     """
 
     def __init__(self,
-                 voltage_init=48.0,  # 初始电压（V）
+                 voltage_init=36.0,  # 初始电压（V）
                  capacitance=50.0,  # 电容（F） 论文数值：几十 F 级
                  esr=0.08,  # 等效串联电阻 ESR（Ohm）
                  v_min=24.0,  # 最低工作电压（V）

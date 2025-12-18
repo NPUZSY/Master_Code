@@ -1,18 +1,22 @@
 import time
+import os
+import sys
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import colormaps as cm  # 明确从matplotlib.cm模块导入get_cmap函数
 from scipy.interpolate import RegularGridInterpolator
 from scipy.ndimage import gaussian_filter
 
-# 配置字体信息
-config = {
-    "font.family": 'serif',
-    "font.size": 18,
-    "mathtext.fontset": 'stix',
-    "font.serif": ['SimSun'],  # 设置中文字体为宋体
-}
-plt.rcParams.update(config)
+
+current_file_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(os.path.dirname(current_file_dir))
+
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+from Scripts.utils.global_utils import *
+# 获取字体（优先宋体+Times New Roman，解决中文/负号显示）
+font_get()
 global_cmap = "coolwarm"
 
 np.random.seed(0)
@@ -21,7 +25,7 @@ SAVE_FIGURES = True
 
 
 def data_read_process():
-    data = np.load("../Data/combined_icartt_data.npy")
+    data = np.load("./Data/combined_icartt_data.npy")
 
     # 假设数据存储在data数组中，第一列是时间，第二列是温度
     # 数据清洗和转换部分（此处简单示例，可根据实际情况完善）
@@ -158,8 +162,20 @@ def plot_bar(probability_matrix, min_temp, num_intervals, temp_interval, z_label
     ax.set_zlabel(z_label, labelpad=10)
     ax.set_title(title)
 
-    plt.get_current_fig_manager().window.showMaximized()
-    if SAVE_FIGURES: plt.savefig(f"../Figures/{title}_bar.png")
+    # 跨平台最大化窗口适配
+    manager = plt.get_current_fig_manager()
+    try:
+        # Windows (TkAgg/QtAgg)
+        manager.window.showMaximized()
+    except AttributeError:
+        try:
+            # Linux (GTK)
+            manager.resize(*manager.window.maxsize())
+        except:
+            # 通用 fallback：设置大尺寸
+            manager.resize(1600, 900)
+    
+    if SAVE_FIGURES: plt.savefig(f"./Figures/{title}_bar.png", dpi=1200)
     plt.ioff()
 
 
@@ -201,31 +217,43 @@ def plot_surf(probability_matrix, min_temp, max_temp, num_intervals, temp_interv
     ax.plot(x_curve, [max_temp] * len(x_curve), z_curve, '#FFA500', label='Temperature Transition')
     ax.legend(fontsize=16)
 
-    plt.get_current_fig_manager().window.showMaximized()
-    if SAVE_FIGURES: plt.savefig(f"../Figures/{title}_surf.png")
+    # 跨平台最大化窗口适配
+    manager = plt.get_current_fig_manager()
+    try:
+        # Windows (TkAgg/QtAgg)
+        manager.window.showMaximized()
+    except AttributeError:
+        try:
+            # Linux (GTK)
+            manager.resize(*manager.window.maxsize())
+        except:
+            # 通用 fallback：设置大尺寸
+            manager.resize(1600, 900)
+    
+    if SAVE_FIGURES: plt.savefig(f"./Figures/{title}_surf.png", dpi=1200)
     plt.ioff()
 
 
 if __name__ == '__main__':
     probability_matrix_, min_temp_, max_temp_, num_intervals, temp_interval, temp_probabilities_ = data_read_process()
-    # plot_bar(probability_matrix_, min_temp_, num_intervals, temp_interval, 'Transition Times', "Source Data")
+    plot_bar(probability_matrix_, min_temp_, num_intervals, temp_interval, 'Transition Times', "Source Data")
 
     # # 移动平均
     # probability_matrix_ = moving_average_smoothing(probability_matrix_, window_size=100)
-    # plot_bar(probability_matrix_, min_temp, num_intervals, temp_interval, 'Transition Times', "Average Data")
+    plot_bar(probability_matrix_, min_temp_, num_intervals, temp_interval, 'Transition Times', "Average Data")
 
     # 高斯滤波
     probability_matrix_ = gaussian_filter(probability_matrix_[:, :, 0], sigma=5)[:, :, np.newaxis]
-    # plot_bar(probability_matrix_, min_temp_, num_intervals, temp_interval, 'Transition Times', "Filter Data")
+    plot_bar(probability_matrix_, min_temp_, num_intervals, temp_interval, 'Transition Times', "Filter Data")
     # 插值
     probability_matrix_, min_temp_, num_intervals_interpolated, temp_interval_new = interpolation(probability_matrix_,
                                                                                                   min_temp_, max_temp_,
                                                                                                   1)
-    # plot_bar(probability_matrix_, min_temp, num_intervals_interpolated, temp_interval, 'Transition Times', "Interpolated Data")
+    plot_bar(probability_matrix_, min_temp_, num_intervals_interpolated, temp_interval, 'Transition Times', "Interpolated Data")
 
     # 归一化
     probability_matrix_ = normalize(probability_matrix_)
-    # plot_bar(probability_matrix_, min_temp_, num_intervals_interpolated, temp_interval, 'Transition Probability', "Normalized Data")
+    plot_bar(probability_matrix_, min_temp_, num_intervals_interpolated, temp_interval, 'Transition Probability', "Normalized Data")
 
     plot_surf(probability_matrix_, min_temp_, max_temp_, num_intervals_interpolated, temp_interval_new,
               temp_probabilities_, '转移概率',

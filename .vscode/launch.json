@@ -8,9 +8,8 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "args": [
-                "--net-date", "1217",
-                "--train-id", "13",
-                "--model-prefix", "bs64_lr0_ep_576_pool50_freq50_MARL_FROM_SCRATCH_bs64_lr0_MARL_IQL_32x20x2_MAX_R0"
+                "--net-date", "1218",
+                "--train-id", "2"
 
             ]
         },

@@ -4,7 +4,9 @@ import time
 import numpy as np
 import matplotlib.patches as mpatches
 import os
+import json  # 新增：导入json模块
 import argparse  # 新增：导入参数解析模块
+from json import JSONEncoder  # 新增：导入JSON编码器基类
 
 # 导入公共模块（与训练代码保持一致的导入形式）
 from MARL_Engine import setup_project_root, device, IndependentDQN
@@ -14,7 +16,27 @@ from Scripts.utils.global_utils import *
 # 获取字体（优先宋体+Times New Roman，解决中文/负号显示）
 font_get()
 
-# ====================== 新增：命令行参数解析 ======================
+# ====================== 新增：自定义JSON编码器（处理numpy类型） ======================
+class NumpyEncoder(JSONEncoder):
+    """自定义JSON编码器，处理numpy类型和其他非标准类型"""
+    def default(self, obj):
+        # 处理numpy数值类型
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        # 处理torch张量
+        elif isinstance(obj, torch.Tensor):
+            return obj.cpu().numpy().tolist()
+        # 处理其他数值类型
+        elif isinstance(obj, (np.float32, np.float64, np.int32, np.int64)):
+            return float(obj)
+        # 调用父类默认方法处理其他类型
+        return super(NumpyEncoder, self).default(obj)
+
+# ====================== 命令行参数解析 ======================
 def parse_args():
     """解析命令行参数（指定待测试模型路径）"""
     parser = argparse.ArgumentParser(description='MARL模型测试脚本（支持指定待测试模型路径）')
@@ -25,10 +47,9 @@ def parse_args():
     parser.add_argument('--train-id', type=str, required=True,
                         help='模型对应的训练ID（必填，如：11）')
     
-    
     # 可选配置参数
     parser.add_argument('--model-prefix', type=str, default="MARL_Model", help='模型前缀')
-    parser.add_argument('--seed', type=int, default=42, help='随机种子（默认：0）')
+    parser.add_argument('--seed', type=int, default=42, help='随机种子（默认：42）')
     parser.add_argument('--max-time', type=float, default=800.0, help='最大测试时长（秒，默认：800）')
     parser.add_argument('--sc-threshold', type=float, default=1e-3, help='超级电容非活跃阈值（默认：1e-3）')
     parser.add_argument('--show-plot', action='store_true', help='是否显示测试结果图（默认：仅保存不显示）')
@@ -236,6 +257,101 @@ if __name__ == '__main__':
     sc_inactive_steps = sum(1 for p in power_sc if abs(p) < sc_inactive_threshold)
     sc_inactive_ratio = sc_inactive_steps / total_steps if total_steps > 0 else 0.0
 
+    # ====================== 整理测试结果为JSON格式 ======================
+    test_results = {
+        # 基础配置信息
+        "config": {
+            "model_info": {
+                "net_date": args.net_date,
+                "train_id": args.train_id,
+                "model_prefix": args.model_prefix,
+                "model_path": MODEL_FILE_PREFIX
+            },
+            "test_params": {
+                "seed": args.seed,
+                "max_time": args.max_time,
+                "sc_threshold": args.sc_threshold,
+                "dt": dt,
+                "show_plot": args.show_plot,
+                "save_dir": SAVE_DIR
+            },
+            "env_params": {
+                "n_states": N_STATES,
+                "n_fc_actions": N_FC_ACTIONS,
+                "n_bat_actions": N_BAT_ACTIONS,
+                "n_sc_actions": N_SC_ACTIONS
+            }
+        },
+        # 时间统计
+        "time_metrics": {
+            "total_test_time_s": round(float(total_time), 4),
+            "average_step_time_s": round(float(total_time / total_steps if total_steps > 0 else 0), 6),
+            "total_steps": total_steps,
+            "phase_time_breakdown_s": {
+                "Action_Select": round(float(episode_times['Action_Select']), 4),
+                "Env_Step": round(float(episode_times['Env_Step']), 4),
+                "Logging_Processing": round(float(episode_times['Logging_Processing']), 4),
+                "Other_Overhead": round(float(episode_times['Other_Overhead']), 4)
+            }
+        },
+        # 氢耗统计
+        "hydrogen_consumption": {
+            "total_h2_g": round(float(total_h2), 6),
+            "fc_h2_g": round(float(total_fc_H2_g), 6),
+            "bat_h2_g": round(float(total_bat_H2_g), 6),
+            "fc_h2_ratio": round(float(fc_h2_ratio * 100), 2),
+            "bat_h2_ratio": round(float(bat_h2_ratio * 100), 2)
+        },
+        # 电池统计
+        "battery_stats": {
+            "soc_min": round(float(min(soc_bat) if soc_bat else 0), 6),
+            "soc_max": round(float(max(soc_bat) if soc_bat else 0), 6),
+            "soc_range": round(float(soc_bat_range), 6),
+            "charge_steps": bat_charge_steps,
+            "charge_time_s": round(float(bat_charge_steps * dt), 2),
+            "charge_ratio": round(float(bat_charge_ratio * 100), 2)
+        },
+        # 超级电容统计
+        "supercap_stats": {
+            "release_energy_wh": round(float(sc_release_Wh), 6),
+            "absorb_energy_wh": round(float(sc_absorb_Wh), 6),
+            "inactive_steps": sc_inactive_steps,
+            "inactive_ratio": round(float(sc_inactive_ratio * 100), 2)
+        },
+        # 功率匹配统计
+        "power_matching": {
+            "total_unmatched_power_w_step": round(float(total_unmatched_power), 6),
+            "average_unmatched_power_w": round(float(avg_unmatched_power), 6),
+            "max_unmatched_power_w": round(float(max_unmatched_power), 6),
+            "total_unmatched_energy_wh": round(float(total_unmatched_energy), 6),
+            "unmatched_ratio_percent": round(float(unmatched_ratio), 2),
+            "total_load_demand_w_step": round(float(total_load_demand), 6)
+        },
+        # 核心性能指标
+        "core_metrics": {
+            "total_reward": round(float(ep_r), 2),
+            "test_completed": True,
+            "early_stop": done
+        },
+        # 原始数据（可选存储，便于后续分析）
+        "raw_data": {
+            "times": [round(float(t), 2) for t in times],
+            "power_fc": [round(float(p), 2) for p in power_fc],
+            "battery_power": [round(float(p), 2) for p in battery_power],
+            "power_sc": [round(float(p), 2) for p in power_sc],
+            "soc_bat": [round(float(s), 6) for s in soc_bat],
+            "soc_sc": [round(float(s), 6) for s in soc_sc_list],
+            "unmatched_power": [round(float(p), 2) for p in unmatched_power_list],
+            "loads": [round(float(l), 2) for l in loads[:len(power_fc)]],
+            "temperature": [round(float(t), 2) for t in temperature[:len(power_fc)]]
+        },
+        # 测试时间戳
+        "timestamp": {
+            "test_start_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time_start)),
+            "test_end_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        }
+    }
+
     # 绘图配置（适配Power_Profile的最新修改）
     plt.rcParams.update({
         'font.family': ['Times New Roman'],  # 兼容中英文
@@ -312,6 +428,15 @@ if __name__ == '__main__':
     print(f"   SVG: {save_path_svg}")
     print(f"   PNG: {save_path_png}")
 
+    # ====================== 保存JSON格式测试结果（使用自定义编码器） ======================
+    json_save_path = os.path.join(SAVE_DIR, f"{args.model_prefix}_Test_Results.json")
+    with open(json_save_path, 'w', encoding='utf-8') as f:
+        # 使用自定义编码器处理numpy类型
+        json.dump(test_results, f, cls=NumpyEncoder, indent=4, ensure_ascii=False)
+    
+    print(f"\n📄 JSON格式测试结果已保存:")
+    print(f"   JSON: {json_save_path}")
+
     # 打印详细结果汇总
     print("\n" + "="*80)
     print("📈 测试结果汇总与分析")
@@ -350,3 +475,5 @@ if __name__ == '__main__':
         plt.close()  # 关闭图像释放内存
     
     print(f"\n✅ 测试完成！所有结果已保存至：{SAVE_DIR}")
+    print(f"   📄 JSON结果文件：{json_save_path}")
+    print(f"   📊 可视化文件：{save_path_svg} / {save_path_png}")

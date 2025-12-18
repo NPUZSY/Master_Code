@@ -38,14 +38,17 @@ def parse_args():
                         default="MARL_Model",  # 简化预训练模型前缀
                         help='预训练模型前缀（仅resume-training=True时生效）')
     
+    # 继续训练示例代码：--resume-training --pretrain-date 1218 --pretrain-train-id 2
+
     # 训练超参数（可选，支持命令行覆盖默认值）
     parser.add_argument('--batch-size', type=int, default=32, help='批大小（默认：32）')
-    parser.add_argument('--lr', type=float, default=1e-4, help='学习率（默认：1e-5）')
+    parser.add_argument('--lr', type=float, default=5e-5, help='学习率（默认：1e-5）')
     parser.add_argument('--epsilon', type=float, default=0.9, help='探索率（默认：0.9）')
     parser.add_argument('--gamma', type=float, default=0.95, help='折扣因子（默认：0.95）')
-    parser.add_argument('--pool-size', type=int, default=50, help='池大小（默认：50）')
+    parser.add_argument('--pool-size', type=int, default=100, help='池大小（默认：50）')
     parser.add_argument('--episode', type=int, default=2000, help='训练回合数（默认：1000）')
     parser.add_argument('--learn-frequency', type=int, default=5, help='学习频率（默认：50）')
+    parser.add_argument('--remark', type=str, default="", help='备注')
     
     # 路径参数（可选）
     parser.add_argument('--log-dir', type=str, default=None, help='TensorBoard日志目录（默认：自动生成）')
@@ -78,6 +81,7 @@ RESUME_TRAINING = args.resume_training
 PRETRAIN_DATE = args.pretrain_date
 PRETRAIN_TRAIN_ID = args.pretrain_train_id
 PRETRAIN_MODEL_PREFIX = args.pretrain_model_prefix
+GLOBAL_SEED = 42
 
 # 学习率调度与早停参数
 LR_PATIENCE = 200
@@ -100,8 +104,10 @@ execute_date = time.strftime("%m%d", local_time)
 execute_time = time.strftime("%H%M%S", local_time)  # 新增：记录具体时间
 
 # ====================== 先初始化remark（后续在main中更新） ======================
-remark = ""
+remark = args.remark
 # =====================================================================
+
+torch.manual_seed(GLOBAL_SEED)
 
 # 新增：全局变量存储最优模型文件名（简化为固定前缀）
 best_model_base_name = "MARL_Model"
@@ -127,6 +133,7 @@ def save_hyperparameters(save_path, final_metrics=None):
             "train_id": os.path.basename(save_path),
             "remark": remark,
             "device": str(device),
+            "seed": GLOBAL_SEED,
             "total_training_time_s": round(time.time() - start_time_total, 2) if 'start_time_total' in globals() else 0,
             "best_model_base_name": best_model_base_name,
             "best_model_full_path": os.path.join(save_path, best_model_base_name) if best_model_base_name else "",

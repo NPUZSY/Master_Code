@@ -324,7 +324,7 @@ class Envs(gym.Env):
             r_bat = 0.0
         
         # 偏离0.6的惩罚
-        r_bat += abs(soc_b - 0.6) * 10
+        r_bat += abs(soc_b - 0.6) * 1000
 
         # ----------------------------
         # 匹配误差（保持原有逻辑）
@@ -338,7 +338,7 @@ class Envs(gym.Env):
         # ----------------------------
         reward = float(
             self.w1 * (C_fc + C_bat) + 
-            self.w2 * (r_fc + r_bat * 5) + 
+            self.w2 * (r_fc + r_bat) + 
             self.w3 * r_match
         ) / self.step_length
 
