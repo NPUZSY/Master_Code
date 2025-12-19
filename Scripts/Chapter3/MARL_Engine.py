@@ -16,7 +16,6 @@ def setup_project_root():
 
 # 设备配置
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"Using device: {device}")
 
 # 网络定义
 class Net(nn.Module):

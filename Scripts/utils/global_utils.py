@@ -1,3 +1,5 @@
+import os
+
 def font_get():
     """
     加载Times New Roman和宋体(SimSun)字体，确保Matplotlib正常显示中英文
@@ -43,3 +45,14 @@ def font_get():
         
     except Exception as e:
         print(f"字体验证失败: {e}")
+
+
+# 路径设置
+def setup_project_root():
+    """设置项目根目录到系统路径"""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.abspath(os.path.join(script_dir, '..', '..'))
+    if project_root not in sys.path:
+        sys.path.append(project_root)
+    return project_root
+

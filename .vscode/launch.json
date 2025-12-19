@@ -1,6 +1,7 @@
 {
     "version": "0.2.0",
     "configurations": [
+
         {
             "name": "Python 调试程序: Chap3/Test",
             "type": "debugpy",
@@ -14,10 +15,11 @@
             ]
         },
         {
-            "name": "Python Debugger: Python File",
+            "name": "Python 调试程序: 当前文件",
             "type": "debugpy",
             "request": "launch",
-            "program": "${file}"
-        }
+            "program": "${file}",
+            "console": "integratedTerminal",
+        },
     ]
 }
