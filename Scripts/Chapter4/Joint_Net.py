@@ -1,285 +1,174 @@
-import os
-import sys
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+import os
+import sys
+import argparse
 
-script_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.abspath(os.path.join(script_dir, '..', '..'))
-if project_root not in sys.path:
+# ----------------------------------------------------
+# 1. 环境与路径配置
+# ----------------------------------------------------
+def setup_path():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.abspath(os.path.join(script_dir, '..', '..'))
+    if project_root not in sys.path:
         sys.path.append(project_root)
+    return project_root
 
-from Scripts.utils.global_utils import *
-from Scripts.Chapter3.MARL_Engine import (
-    device,
-    IndependentDQN,
-    Net
-)
+project_root = setup_path()
+# 从 Chapter3 的引擎导入基础组件
+from Scripts.Chapter3.MARL_Engine import Net, IndependentDQN, device
 
-from Scripts.Chapter4.RNN import ActionValueNet  # 修正RNN模块导入路径（根据项目树）
+# ----------------------------------------------------
+# 2. 适配多任务 RNN 模型结构
+# ----------------------------------------------------
+class MultiTaskRNN(nn.Module):
+    """
+    多任务 RNN 结构：处理 7 维输入，输出 1 维回归、4 维分类及 64 维特征
+    """
+    def __init__(self, input_dim=7, hidden_dim_rnn=256, num_layers_rnn=2, hidden_dim_fc=64):
+        super(MultiTaskRNN, self).__init__()
+        self.rnn = nn.GRU(input_dim, hidden_dim_rnn, num_layers=num_layers_rnn, batch_first=True)
+        self.fc_rnn_to_64 = nn.Linear(hidden_dim_rnn, hidden_dim_fc)
+        self.reg_head = nn.Linear(hidden_dim_fc, 1)    # 1维回归输出
+        self.cls_head = nn.Linear(hidden_dim_fc, 4)    # 4维分类输出
+    
+    def forward(self, x):
+        # x shape: (batch, 7)
+        if x.dim() == 2:
+            x = x.unsqueeze(1) # (batch, 1, 7)
+        
+        out_rnn, _ = self.rnn(x)
+        out_rnn = out_rnn[:, -1, :] # 取最后一个时间步
+        
+        feature_64 = F.relu(self.fc_rnn_to_64(out_rnn))
+        reg_out = self.reg_head(feature_64)
+        cls_out = self.cls_head(feature_64)
+        
+        return reg_out, cls_out, feature_64
 
-
-# 耦合网络定义（RNN + MARL）
+# ----------------------------------------------------
+# 3. JointNet 类 (模型拼接：RNN + MARL Head)
+# ----------------------------------------------------
 class JointNet(nn.Module):
-    def __init__(self, rnn_input_dim=7, rnn_hidden_dim_rnn=128, num_layers_rnn=2,
-                 rnn_hidden_dim_fc=64, rnn_output_dim_reg=1, rnn_output_dim_cls=64,
-                 marl_n_actions=32):
+    def __init__(self, rnn_part, marl_head):
         super(JointNet, self).__init__()
-        # RNN子网络（复用test_RNN.py中的结构）
-        self.rnn = nn.GRU(
-            input_size=rnn_input_dim,
-            hidden_size=rnn_hidden_dim_rnn,
-            num_layers=num_layers_rnn,
-            batch_first=True
-        )
-        self.rnn_fc_rnn_to_64 = nn.Linear(rnn_hidden_dim_rnn, rnn_hidden_dim_fc)
-        self.rnn_reg_head = nn.Linear(rnn_hidden_dim_fc, rnn_output_dim_reg)
-        self.rnn_cls_head = nn.Linear(rnn_hidden_dim_fc, rnn_output_dim_cls)
-        
-        # MARL子网络（输入维度改为65=64+1）
-        self.marl_input = nn.Linear(65, 64)  # 64维RNN特征 + 1维RNN回归输出
-        self.marl_input.weight.data.normal_(0, 0.1)
-        
-        self.marl_lay1 = nn.Linear(64, 64)
-        self.marl_lay1.weight.data.normal_(0, 0.1)
-        
-        self.marl_output = nn.Linear(64, marl_n_actions)
-        self.marl_output.weight.data.normal_(0, 0.1)
+        self.rnn_part = rnn_part     # 预训练好的 RNN
+        self.marl_part = marl_head   # MARL 决策头 (输入维度为 65)
 
     def forward(self, x):
-        # RNN部分前向传播
-        x_rnn = x.unsqueeze(1)  # (N, 1, 7)
-        out_rnn, _ = self.rnn(x_rnn)
-        feature_rnn = out_rnn.squeeze(1)  # (N, 128)
-        feature_64 = F.relu(self.rnn_fc_rnn_to_64(feature_rnn))  # (N, 64)
-        
-        # RNN输出（回归+分类）
-        a_out_reg = torch.sigmoid(self.rnn_reg_head(feature_64))  # (N, 1)
-        a_out_cls_logits = self.rnn_cls_head(feature_64)  # (N, 64)
-        
-        # 特征拼接（64维特征 + 1维回归输出）
-        marl_input = torch.cat([feature_64, a_out_reg], dim=1)  # (N, 65)
-        
-        # MARL部分前向传播
-        x_marl = self.marl_input(marl_input)
-        x_marl = F.relu(x_marl)
-        x_marl = self.marl_lay1(x_marl)
-        x_marl = F.relu(x_marl)
-        actions_value = self.marl_output(x_marl)  # 最终动作价值
-        
-        return actions_value, a_out_reg, a_out_cls_logits, feature_64
+        # 1. 提取 RNN 特征
+        reg_out, _, feature_64 = self.rnn_part(x)
+        # 2. 拼接：64维特征 + 1维回归值 = 65维
+        joint_input = torch.cat([feature_64, reg_out], dim=1)
+        # 3. 传入决策层
+        return self.marl_part(joint_input)
 
-    def load_joint_weights(self, rnn_model_path, marl_model_path=None):
-        """
-        加载联合网络的权重（支持分别加载RNN和MARL的预训练参数）
-        
-        Args:
-            rnn_model_path (str): RNN模型权重文件路径 (.pth)
-            marl_model_path (str, optional): MARL模型权重文件路径 (.pth)
-        """
-        # 1. 加载RNN部分权重（复用ActionValueNet的结构）
-        if os.path.exists(rnn_model_path):
-            # 初始化RNN参考模型
-            rnn_ref = ActionValueNet(
-                input_dim=self.rnn.input_size,
-                hidden_dim_rnn=self.rnn.hidden_size,
-                num_layers_rnn=self.rnn.num_layers,
-                hidden_dim_fc=self.rnn_fc_rnn_to_64.out_features,
-                output_dim_reg=self.rnn_reg_head.out_features,
-                output_dim_cls=self.rnn_cls_head.out_features
-            )
-            # 加载权重
-            rnn_ref.load_state_dict(torch.load(rnn_model_path, map_location=device))
-            # 复制到当前网络的RNN部分
-            self.rnn.load_state_dict(rnn_ref.rnn.state_dict())
-            self.rnn_fc_rnn_to_64.load_state_dict(rnn_ref.fc_rnn_to_64.state_dict())
-            self.rnn_reg_head.load_state_dict(rnn_ref.reg_head.state_dict())
-            self.rnn_cls_head.load_state_dict(rnn_ref.cls_head.state_dict())
-            print(f"✅ 成功加载RNN权重: {rnn_model_path}")
-        else:
-            raise FileNotFoundError(f"RNN模型文件不存在: {rnn_model_path}")
+    def save_joint_model(self, path):
+        torch.save(self.state_dict(), path)
+        print(f"✅ JointNet saved to: {path}")
 
-        # 2. 加载MARL部分权重（可选，若提供）
-        if marl_model_path and os.path.exists(marl_model_path):
-            # 假设MARL模型是IndependentDQN中使用的Net结构
-            marl_ref = Net(
-                N_STATES=65,  # 联合网络中MARL的输入维度是65
-                N_ACTIONS=self.marl_output.out_features
-            )
-            marl_ref.load_state_dict(torch.load(marl_model_path, map_location=device))
-            # 复制到当前网络的MARL部分
-            self.marl_input.load_state_dict(marl_ref.input.state_dict())
-            self.marl_lay1.load_state_dict(marl_ref.lay1.state_dict())
-            self.marl_output.load_state_dict(marl_ref.output.state_dict())
-            print(f"✅ 成功加载MARL权重: {marl_model_path}")
-
-
+# ----------------------------------------------------
+# 4. JointDQN 智能体类
+# ----------------------------------------------------
 class JointDQN(IndependentDQN):
-    """继承自IndependentDQN，扩展支持JointNet作为动作选择网络"""
-    
-    def __init__(self, agent_name, N_STATES, N_AGENT_ACTIONS, shared_memory=None, 
-                 memory_counter_ref=None, joint_net_kwargs=None):
-        # 调用父类初始化方法（保持原有参数兼容）
-        super().__init__(agent_name, N_STATES, N_AGENT_ACTIONS, shared_memory, memory_counter_ref)
+    def __init__(self, agent_name, rnn_model, n_actions):
+        # 初始化基类，输入维度设为 65
+        super(JointDQN, self).__init__(agent_name, 65, n_actions)
         
-        # 配置联合网络参数（默认值基于test_RNN.py中的ActionValueNet）
-        self.joint_net_kwargs = joint_net_kwargs or {
-            "input_dim": N_STATES,
-            "hidden_dim_rnn": 128,
-            "num_layers_rnn": 2,
-            "hidden_dim_fc": 64,
-            "output_dim_reg": 1,
-            "output_dim_cls": N_AGENT_ACTIONS  # 分类输出维度与动作数匹配
-        }
+        # 显式保存 n_actions 属性，防止 choose_action 报错
+        self.n_actions = n_actions 
         
-        # 替换为JointNet（复用test_RNN.py中的ActionValueNet作为联合网络）
-        self.eval_net = ActionValueNet(**self.joint_net_kwargs).to(device)
-        self.target_net = ActionValueNet(** self.joint_net_kwargs).to(device)
+        # 替换 eval_net 和 target_net 为拼接后的 JointNet
+        # 这里的 self.eval_net 是父类生成的 Net(65, n_actions)
+        self.eval_net = JointNet(rnn_model, self.eval_net).to(device)
+        self.target_net = JointNet(rnn_model, self.target_net).to(device)
         self.target_net.load_state_dict(self.eval_net.state_dict())
 
-    def load_net(self, base_name, pretrain_date=None, pretrain_train_id=None, 
-                 rnn_base_name=None, project_root=None):
+    def choose_action(self, x, train=False, epsilon=0.9):
         """
-        重写加载方法：支持传入base_name，根据智能体名称拼接真实模型路径
-        适配多智能体（FC_Agent/Bat_Agent/SC_Agent）的模型命名规则
-        
-        Args:
-            base_name (str): 模型前缀（如MARL_Model）
-            pretrain_date (str, optional): 预训练日期目录（如1218）
-            pretrain_train_id (str, optional): 预训练训练ID目录（如9）
-            rnn_base_name (str, optional): RNN模型前缀（如rnn_classifier_multitask）
-            project_root (str, optional): 项目根目录，默认从MARL_Engine获取
+        支持 7 维输入，内部执行 RNN 提取和决策
+        注意：参照参考代码，epsilon 是贪婪概率
         """
-        # 1. 确定项目根目录
-
-        # 2. 拼接智能体对应的模型后缀
-        agent_suffix_map = {
-            "FC_Agent": "FC",
-            "Bat_Agent": "BAT",
-            "SC_Agent": "SC"
-        }
-        if self.agent_name not in agent_suffix_map:
-            raise ValueError(f"不支持的智能体名称: {self.agent_name}，仅支持{list(agent_suffix_map.keys())}")
-        agent_suffix = agent_suffix_map[self.agent_name]
-        
-        # 3. 拼接MARL部分模型路径
-        if pretrain_date and pretrain_train_id:
-            marl_base_dir = os.path.join(project_root, "nets", "Chap3", pretrain_date, pretrain_train_id)
-            marl_model_path = os.path.join(marl_base_dir, f"{base_name}_{agent_suffix}.pth")
-        else:
-            # 若未指定日期/ID，直接使用base_name作为完整路径
-            marl_model_path = base_name
-        
-        # 4. 拼接RNN部分模型路径（可选）
-        rnn_model_path = None
-        if rnn_base_name:
-            # RNN模型默认存储路径（可根据实际目录调整）
-            rnn_base_dir = os.path.join(project_root, "nets", "Chap4", "RNN_Reg_Opt_MultiTask", pretrain_date, pretrain_train_id)
-            rnn_model_path = os.path.join(rnn_base_dir, f"{rnn_base_name}.pth")
-
-        # 5. 检查MARL模型文件是否存在
-        if not os.path.exists(marl_model_path):
-            raise FileNotFoundError(f"MARL模型文件不存在: {marl_model_path}")
-        
-        # 6. 加载权重（兼容单独加载RNN权重或完整联合网络权重）
-        if rnn_model_path and os.path.exists(rnn_model_path):
-            # 先加载RNN基础权重
-            rnn_state_dict = torch.load(rnn_model_path, map_location=device)
-            # 过滤出RNN相关层权重（仅加载RNN部分）
-            rnn_filtered = {k: v for k, v in rnn_state_dict.items() if k.startswith('rnn.')}
-            self.eval_net.load_state_dict(rnn_filtered, strict=False)
-            print(f"✅ 成功加载{self.agent_name}的RNN权重: {rnn_model_path}")
+        x_tensor = torch.FloatTensor(x).to(device)
+        if x_tensor.dim() == 1: 
+            x_tensor = x_tensor.unsqueeze(0)
             
-            # 再加载MARL部分权重
-            marl_state_dict = torch.load(marl_model_path, map_location=device)
-            marl_filtered = {k: v for k, v in marl_state_dict.items() if not k.startswith('rnn.')}
-            self.eval_net.load_state_dict(marl_filtered, strict=False)
-            print(f"✅ 成功加载{self.agent_name}的MARL权重: {marl_model_path}")
+        # 训练模式下的 Epsilon-Greedy
+        # 参考代码逻辑: uniform < epsilon 时利用(贪婪)，否则探索
+        if train and np.random.uniform() >= epsilon:
+            action = np.random.randint(0, self.n_actions)
         else:
-            # 直接加载完整联合网络权重
-            full_state_dict = torch.load(marl_model_path, map_location=device)
-            self.eval_net.load_state_dict(full_state_dict)
-            print(f"✅ 成功加载{self.agent_name}的联合网络权重: {marl_model_path}")
-        
-        # 7. 同步目标网络并设置为评估模式
-        self.eval_net.to(device)
-        self.target_net.load_state_dict(self.eval_net.state_dict())
-        self.eval_net.eval()
-
-    def choose_action(self, state_input: np.ndarray, train=True, epsilon=0.9):
-        """重写动作选择：适配JointNet的输出格式（从test_RNN.py兼容）"""
-        state_tensor = torch.FloatTensor(state_input).to(device)
-        state_tensor = torch.unsqueeze(state_tensor, 0)  # 增加批次维度
-        
-        with torch.no_grad():
-            # JointNet输出格式：(a_out_reg, a_out_cls_logits, feature_64)
-            _, actions_logits, _ = self.eval_net(state_tensor)
-            actions_value = F.softmax(actions_logits, dim=1)  # 转换为概率分布
+            with torch.no_grad():
+                actions_value = self.eval_net(x_tensor)
+            action = torch.max(actions_value, 1)[1].item()
             
-            # 保持原有epsilon-greedy策略
-            if train and np.random.uniform() < epsilon:
-                return torch.max(actions_value, 1)[1].item()
-            else:
-                return torch.max(actions_value, 1)[1].item()
+        return action
 
-    def learn(self, agent_idx, n_states, gamma=0.95, target_replace_iter=100, batch_size=32):
-        """重写训练方法：适配JointNet的输出格式"""
-        # 复用父类的目标网络同步逻辑
-        if self.learn_step_counter % target_replace_iter == 0:
-            self.target_net.load_state_dict(self.eval_net.state_dict())
-        self.learn_step_counter += 1
+# ----------------------------------------------------
+# 5. 模型构建与权重迁移
+# ----------------------------------------------------
+def build_and_test(args):
+    # --- A. 加载多任务 RNN ---
+    print(f"🚀 Loading RNN Weights from: {args.rnn_path}")
+    rnn_model = MultiTaskRNN().to(device)
+    rnn_model.load_state_dict(torch.load(args.rnn_path, map_location=device))
+    rnn_model.eval()
 
-        # 复用父类的经验采样逻辑
-        sample_index = np.random.choice(self.shared_memory.shape[0], batch_size)
-        b_memory = self.shared_memory[sample_index, :]
+    # --- B. 准备保存路径 ---
+    save_dir = os.path.join(project_root, "nets", "Chap4", "Joint_Net", args.net_date, args.train_id)
+    os.makedirs(save_dir, exist_ok=True)
 
-        b_s = torch.FloatTensor(b_memory[:, :n_states]).to(device)
-        action_col = n_states + agent_idx
-        b_a = torch.LongTensor(b_memory[:, action_col:action_col+1].astype(int)).to(device)
-        b_r = torch.FloatTensor(b_memory[:, n_states+3:n_states+4]).to(device)
-        b_s_ = torch.FloatTensor(b_memory[:, n_states+4:]).to(device)
+    # --- C. 定义智能体 ---
+    agents_info = [
+        {"name": "FC", "n_act": 32},
+        {"name": "BAT", "n_act": 40},
+        {"name": "SC", "n_act": 2}
+    ]
 
-        # 适配JointNet的Q值计算（提取分类头输出）
-        _, q_eval_logits, _ = self.eval_net(b_s)
-        q_eval = F.softmax(q_eval_logits, dim=1).gather(1, b_a)
-        
-        _, q_next_logits, _ = self.target_net(b_s_)
-        q_next = F.softmax(q_next_logits, dim=1).detach()
-        q_target = b_r + gamma * q_next.max(1)[0].view(batch_size, 1)
+    agents = []
+    for info in agents_info:
+        name, n_act = info["name"], info["n_act"]
+        print(f"\nProcessing [{name}] Agent...")
 
-        # 复用父类的反向传播逻辑
-        loss = self.loss_func(q_eval, q_target)
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
+        # 1. 加载旧的 MARL 权重 (原本是 7 维输入)
+        marl_file = os.path.join(args.marl_path, f"MARL_Model_{name}.pth")
+        if not os.path.exists(marl_file):
+            print(f"⚠️  Missing: {marl_file}, skipping.")
+            continue
 
-def main():
-    N_STATES = 7
-    N_FC_ACTIONS = 32
-    N_BAT_ACTIONS = 40
-    N_SC_ACTIONS = 2
-    N_FC_ACTIONS
+        old_net = Net(N_STATES=7, N_ACTIONS=n_act).to(device)
+        old_net.load_state_dict(torch.load(marl_file, map_location=device))
 
-    fc_agent_old = IndependentDQN("FC_Agent", N_STATES, N_FC_ACTIONS)
+        # 2. 构造新的 Joint 智能体
+        agent = JointDQN(name, rnn_model, n_act)
 
-    # 初始化JointDQN智能体
-    fc_agent = JointDQN(
-        agent_name="FC_Agent",
-        N_STATES=7,
-        N_AGENT_ACTIONS=32,
-        joint_net_kwargs={"hidden_dim_rnn": 256}
-    )
+        # 3. 权重迁移 (核心)
+        # 迁移 lay1 和 output，input 层(65->64)保持随机初始化
+        agent.eval_net.marl_part.lay1.load_state_dict(old_net.lay1.state_dict())
+        agent.eval_net.marl_part.output.load_state_dict(old_net.output.state_dict())
+        agent.target_net.load_state_dict(agent.eval_net.state_dict())
 
-    # 加载预训练模型（传入base_name和目录参数）
-    fc_agent.load_net(
-        base_name="MARL_Model",
-        pretrain_date="1218",
-        pretrain_train_id="36",
-        rnn_base_name="MARL_Model",
-        project_root=project_root
-    )
-    pass
+        # 4. 保存
+        agent.eval_net.save_joint_model(os.path.join(save_dir, f"Joint_Model_{name}.pth"))
+        agents.append(agent)
 
-if __name__ == '__main__':
-    main()
+    # --- D. 测试 ---
+    print("\n" + "="*30)
+    print("🔍 Testing Inference with 7-dim input...")
+    sample_input = np.random.rand(7).astype(np.float32)
+    for a in agents:
+        action = a.choose_action(sample_input, train=False)
+        print(f"-> Agent [{a.agent_name}] Action: {action}")
+    print("="*30)
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Build JointNet from Pretrained Models")
+    parser.add_argument('--rnn_path', type=str, default="/home/siyu/Master_Code/nets/Chap4/RNN_Reg_Opt_MultiTask/1216/17/rnn_classifier_multitask.pth")
+    parser.add_argument('--marl_path', type=str, default="./nets/Chap3/1218/36")
+    parser.add_argument('--net_date', type=str, default="1219")
+    parser.add_argument('--train_id', type=str, default="1")
+    args = parser.parse_args()
+
+    build_and_test(args)
