@@ -35,6 +35,28 @@ from Scripts.Chapter4.Joint_Net import MultiTaskRNN, JointNet, JointDQN
 
 font_get()
 
+"""
+示例训练脚本
+
+从头训练
+
+nohup python Scripts/Chapter4/train_Joint.py \
+--episode 5000 \
+--pool-size 200 > logs/1222_5.log 2>&1 &
+
+继续训练
+
+nohup python Scripts/Chapter4/train_Joint.py \
+--resume-training \
+--pretrain-date 1223 \
+--pretrain-train-id 0 \
+--epsilon 0.9 \
+--lr 1e-4 \
+--pretrain-model-prefix "Joint_Model" \
+--episode 2000 > logs/1223_2.log 2>&1 &
+
+"""
+
 # ====================== 新增：命令行参数解析（对齐train.py） ======================
 def parse_args():
     """解析命令行参数（支持从头训练/继续训练）"""
@@ -55,7 +77,7 @@ def parse_args():
 
     # 训练超参数（可选，支持命令行覆盖默认值）
     parser.add_argument('--batch-size', type=int, default=32, help='批大小（默认：32）')
-    parser.add_argument('--lr', type=float, default=1e-6, help='学习率（默认：1e-6）')
+    parser.add_argument('--lr', type=float, default=1e-5, help='学习率（默认：1e-5）')
     parser.add_argument('--epsilon', type=float, default=0.9, help='探索率（默认：0.9）')
     parser.add_argument('--gamma', type=float, default=0.95, help='折扣因子（默认：0.95）')
     parser.add_argument('--pool-size', type=int, default=100, help='池大小（默认：20）')
@@ -65,9 +87,9 @@ def parse_args():
     
     # 路径参数（可选）
     parser.add_argument('--log-dir', type=str, default=None, help='TensorBoard日志目录（默认：自动生成）')
-    parser.add_argument('--rnn-path', type=str, 
+    parser.add_argument('--init-rnn-path', type=str, 
                         default=os.path.join(project_root, "nets/Chap4/RNN_Reg_Opt_MultiTask/1216/17/rnn_classifier_multitask.pth"),
-                        help='预训练RNN模型路径')
+                        help='从头训练时初始化RNN的路径（resume-training=True时无效）')
     
     return parser.parse_args()
 
@@ -144,7 +166,7 @@ def save_hyperparameters(save_path, final_metrics=None):
                 "pretrain_date": PRETRAIN_DATE if RESUME_TRAINING else "",
                 "pretrain_train_id": PRETRAIN_TRAIN_ID if RESUME_TRAINING else "",
                 "pretrain_model_prefix": PRETRAIN_MODEL_PREFIX if RESUME_TRAINING else "",
-                "rnn_path": args.rnn_path
+                "init_rnn_path": args.init_rnn_path if not RESUME_TRAINING else "NOT_USED"
             }
         },
         # 核心超参数
@@ -170,7 +192,7 @@ def save_hyperparameters(save_path, final_metrics=None):
         # 环境参数
         "env_params": {
             "N_STATES": N_STATES,
-            "MEMORY_WIDTH": MEMORY_WIDTH,
+            "MEMORY_WIDTH": MEMORY_WIDTH if 'MEMORY_WIDTH' in globals() else 0,
             "step_length": env.step_length if hasattr(env, 'step_length') else "unknown"
         },
         # 训练结果指标
@@ -193,7 +215,7 @@ def save_hyperparameters(save_path, final_metrics=None):
             f.write(f"【{section.upper()}】\n")
             f.write("-" * 60 + "\n")
             for key, value in params.items():
-                if key in ["best_model_base_name", "best_model_full_path", "resume_training", "rnn_path"]:
+                if key in ["best_model_base_name", "best_model_full_path", "resume_training", "init_rnn_path"]:
                     f.write(f"{key:<30}: \033[1;32m{value}\033[0m\n")
                 else:
                     f.write(f"{key:<30}: {value}\n")
@@ -218,12 +240,13 @@ def print_time_breakdown(episode, episode_times):
         print(f"| {name.ljust(15)} | {time_val:9.4f} s | {percentage:6.2f} % |")
     print("=" * 45)
 
-# ====================== 加载预训练模型函数（增强版） ======================
-def load_joint_agents(rnn_model, pretrain_date, pretrain_id, prefix):
-    """加载预训练JointNet智能体（支持缺失处理）"""
+# ====================== 加载完整Joint模型函数（核心修改） ======================
+def load_full_joint_agents(pretrain_date, pretrain_id, prefix):
+    """加载包含RNN的完整JointNet智能体"""
     pretrain_dir = os.path.join(project_root, "nets", "Chap4", "Joint_Net", pretrain_date, pretrain_id)
     agents = {}
     names = ["FC", "BAT", "SC"]
+    rnn_model = None
     
     if not os.path.exists(pretrain_dir):
         raise FileNotFoundError(f"预训练目录不存在: {pretrain_dir}")
@@ -251,7 +274,12 @@ def load_joint_agents(rnn_model, pretrain_date, pretrain_id, prefix):
         while True:
             user_input = input("\n📌 是否重新初始化这些缺失的智能体？(y/n): ").strip().lower()
             if user_input in ['y', 'yes']:
-                # 重新初始化缺失的智能体
+                # 重新初始化缺失的智能体（需要先初始化RNN）
+                print("\n🔄 重新初始化RNN模型（使用默认初始路径）...")
+                rnn_model = MultiTaskRNN().to(device)
+                rnn_model.load_state_dict(torch.load(args.init_rnn_path, map_location=device))
+                rnn_model.train()
+                
                 action_dims = {"FC": 32, "BAT": 40, "SC": 2}  # 默认动作维度
                 for name in missing_agent_names:
                     print(f"\n🔄 重新初始化{name} Agent（从0开始）...")
@@ -266,27 +294,71 @@ def load_joint_agents(rnn_model, pretrain_date, pretrain_id, prefix):
             else:
                 print("⚠️ 输入无效，请输入 y/yes 或 n/no！")
 
-    # 第三步：加载存在的模型
+    # 第三步：加载存在的完整Joint模型
     for name in existing_paths:
         path = existing_paths[name]
         try:
             ckpt = torch.load(path, map_location=device)
-            # 获取动作维度
-            try:
-                n_act = ckpt['marl_part.output.weight'].shape[0]
-            except KeyError:
-                n_act = ckpt['output.weight'].shape[0]
+            
+            # 判断是否是包含RNN的完整模型
+            has_rnn_params = any(key.startswith('rnn_part.') for key in ckpt.keys())
+            if has_rnn_params:
+                print(f"\n📌 检测到{name}模型包含RNN参数，加载完整Joint模型...")
+                # 初始化RNN（第一次加载时）
+                if rnn_model is None:
+                    rnn_model = MultiTaskRNN().to(device)
                 
-            agent = JointDQN(name, rnn_model, n_act)
-            agent.eval_net.load_state_dict(ckpt)
-            agent.target_net.load_state_dict(ckpt)
-            agent.setup_optimizer(LR, LR_FACTOR, LR_PATIENCE)
-            agents[name] = agent
-            print(f"✅ 成功加载{name} Agent: {path}")
+                # 获取动作维度
+                try:
+                    n_act = ckpt['marl_part.output.weight'].shape[0]
+                except KeyError:
+                    n_act = ckpt['output.weight'].shape[0]
+                
+                # 初始化Agent并加载完整参数（包含RNN）
+                agent = JointDQN(name, rnn_model, n_act)
+                agent.eval_net.load_state_dict(ckpt)
+                agent.target_net.load_state_dict(ckpt)
+                agent.setup_optimizer(LR, LR_FACTOR, LR_PATIENCE)
+                agents[name] = agent
+                
+                # 更新RNN模型（所有Agent共享同一个RNN）
+                rnn_model = agent.eval_net.rnn_part
+                rnn_model.train()
+                
+                print(f"✅ 成功加载包含RNN的{name}完整Joint模型: {path}")
+            else:
+                print(f"\n📌 {name}模型不包含RNN参数，加载传统MARL模型...")
+                # 兼容旧模型，需要初始化RNN
+                if rnn_model is None:
+                    rnn_model = MultiTaskRNN().to(device)
+                    rnn_model.load_state_dict(torch.load(args.init_rnn_path, map_location=device))
+                    rnn_model.train()
+                
+                # 获取动作维度
+                try:
+                    n_act = ckpt['output.weight'].shape[0]
+                except KeyError:
+                    n_act = 32 if name == "FC" else 40 if name == "BAT" else 2
+                
+                agent = JointDQN(name, rnn_model, n_act)
+                agent.eval_net.marl_part.load_state_dict(ckpt)
+                agent.target_net.marl_part.load_state_dict(ckpt)
+                agent.setup_optimizer(LR, LR_FACTOR, LR_PATIENCE)
+                agents[name] = agent
+                print(f"✅ 成功加载{name} MARL模型（使用初始RNN）: {path}")
+                
         except Exception as e:
             raise RuntimeError(f"加载{name} Agent失败: {e}")
-        
-    return agents["FC"], agents["BAT"], agents["SC"]
+    
+    # 确保所有Agent共享同一个RNN模型
+    if rnn_model is None:
+        raise RuntimeError("未能初始化/加载RNN模型")
+    
+    for name in agents:
+        agents[name].eval_net.rnn_part = rnn_model
+        agents[name].target_net.rnn_part = rnn_model
+    
+    return agents["FC"], agents["BAT"], agents["SC"], rnn_model
 
 # ====================== Main 训练逻辑（完整增强版） ======================
 if __name__ == '__main__':
@@ -300,7 +372,9 @@ if __name__ == '__main__':
         print(f"  - 日期文件夹: {PRETRAIN_DATE}")
         print(f"  - Train ID: {PRETRAIN_TRAIN_ID}")
         print(f"  - 模型前缀: {PRETRAIN_MODEL_PREFIX}")
-        print(f"  - RNN模型路径: {args.rnn_path}")
+        print(f"  - 初始RNN路径: 【继续训练模式，不使用】")
+    else:
+        print(f"  - 初始RNN路径: {args.init_rnn_path}")
     print(f"核心超参数:")
     print(f"  - 批大小: {BATCH_SIZE}")
     print(f"  - 学习率: {LR:.6f}")
@@ -325,29 +399,34 @@ if __name__ == '__main__':
     log_dir = args.log_dir if args.log_dir else os.path.join(base_path, "logs")
     writer = SummaryWriter(log_dir=log_dir)
 
-    # 3. 初始化基础 RNN
-    try:
-        rnn_model = MultiTaskRNN().to(device)
-        rnn_model.load_state_dict(torch.load(args.rnn_path, map_location=device))
-        rnn_model.train()  # ✅ 设置为训练模式，允许反向传播
-    # 如果希望冻结RNN参数（只训练DQN部分），添加以下代码
-        for param in rnn_model.parameters():
-            param.requires_grad = False
-    except FileNotFoundError as e:
-        print(f"❌ RNN模型文件未找到: {e}")
-        raise
-    except Exception as e:
-        print(f"❌ RNN模型加载失败: {e}")
-        raise
-
-    # 4. 加载/初始化智能体
+    # 3. 初始化/加载模型（核心修改）
+    rnn_model = None
+    FC_Agent, Bat_Agent, SC_Agent = None, None, None
+    
     if RESUME_TRAINING:
-        print("\n📌 开始加载预训练JointNet模型...")
-        FC_Agent, Bat_Agent, SC_Agent = load_joint_agents(
-            rnn_model, PRETRAIN_DATE, PRETRAIN_TRAIN_ID, PRETRAIN_MODEL_PREFIX
-        )
+        print("\n📌 开始加载包含RNN的完整预训练JointNet模型...")
+        try:
+            FC_Agent, Bat_Agent, SC_Agent, rnn_model = load_full_joint_agents(
+                PRETRAIN_DATE, PRETRAIN_TRAIN_ID, PRETRAIN_MODEL_PREFIX
+            )
+            print(f"✅ 成功加载所有包含RNN的完整JointNet智能体")
+        except Exception as e:
+            print(f"❌ 加载完整Joint模型失败: {e}")
+            raise
     else:
-        print("\n📌 从头初始化JointNet智能体...")
+        print("\n📌 从头初始化JointNet智能体（包含RNN）...")
+        # 初始化基础 RNN
+        try:
+            rnn_model = MultiTaskRNN().to(device)
+            rnn_model.load_state_dict(torch.load(args.init_rnn_path, map_location=device))
+            rnn_model.train()  # 设置为训练模式，允许反向传播
+        except FileNotFoundError as e:
+            print(f"❌ 初始RNN模型文件未找到: {e}")
+            raise
+        except Exception as e:
+            print(f"❌ 初始RNN模型加载失败: {e}")
+            raise
+        
         # 从头初始化智能体
         FC_Agent = JointDQN("FC", rnn_model, 32)
         Bat_Agent = JointDQN("BAT", rnn_model, 40)
@@ -356,7 +435,7 @@ if __name__ == '__main__':
         FC_Agent.setup_optimizer(LR, LR_FACTOR, LR_PATIENCE)
         Bat_Agent.setup_optimizer(LR, LR_FACTOR, LR_PATIENCE)
         SC_Agent.setup_optimizer(LR, LR_FACTOR, LR_PATIENCE)
-        print(f"✅ 成功初始化所有JointNet智能体")
+        print(f"✅ 成功初始化所有JointNet智能体（包含RNN）")
 
     all_agents = [FC_Agent, Bat_Agent, SC_Agent]
 
@@ -388,8 +467,9 @@ if __name__ == '__main__':
         if training_done:
             break
 
-        # 新增：确保RNN处于训练模式
-        rnn_model.train()
+        # 确保RNN处于训练模式
+        if rnn_model is not None:
+            rnn_model.train()
         s = env.reset()
         ep_r = 0
         episode_times = {
@@ -473,15 +553,18 @@ if __name__ == '__main__':
         x_episodes.append(i_episode)
         y_rewards.append(ep_r)
 
-        # 模型保存与早停逻辑
+        # 模型保存与早停逻辑（核心修改：保存包含RNN的完整模型）
         if ep_r > reward_max + REWARD_THRESHOLD:
             reward_max = ep_r
             reward_not_improve_episodes = 0
-            # 保存最优模型
+            # 保存包含RNN的完整最优模型
             torch.save(FC_Agent.eval_net.state_dict(), os.path.join(base_path, f"{best_model_base_name}_FC.pth"))
             torch.save(Bat_Agent.eval_net.state_dict(), os.path.join(base_path, f"{best_model_base_name}_BAT.pth"))
             torch.save(SC_Agent.eval_net.state_dict(), os.path.join(base_path, f"{best_model_base_name}_SC.pth"))
+            # 额外保存独立的RNN模型（可选）
+            torch.save(rnn_model.state_dict(), os.path.join(base_path, f"{best_model_base_name}_RNN.pth"))
             print(f"\n--- New Max Reward: {reward_max:.2f} ---")
+            print(f"--- 已保存包含RNN的完整Joint模型到: {base_path} ---")
         else:
             reward_not_improve_episodes += 1
 
@@ -498,11 +581,12 @@ if __name__ == '__main__':
     final_episode = i_episode + 1 if not training_done else i_episode
     final_model_name = os.path.join(base_path, f"{best_model_base_name}_FINAL")
     
-    # 保存最终模型
+    # 保存包含RNN的最终完整模型
     torch.save(FC_Agent.eval_net.state_dict(), f"{final_model_name}_FC.pth")
     torch.save(Bat_Agent.eval_net.state_dict(), f"{final_model_name}_BAT.pth")
     torch.save(SC_Agent.eval_net.state_dict(), f"{final_model_name}_SC.pth")
-    print(f"\nFinal models saved: {final_model_name}")
+    torch.save(rnn_model.state_dict(), f"{final_model_name}_RNN.pth")
+    print(f"\nFinal models saved (包含RNN): {final_model_name}")
 
     # 整理训练最终指标
     final_metrics = {
@@ -553,8 +637,9 @@ if __name__ == '__main__':
 
     print(f"\n🎉 JointNet训练完成！所有文件已保存到: {base_path}")
     print(f"\n📋 最优模型文件名前缀：{best_model_base_name}")
+    print(f"📋 模型包含完整的RNN+MARL参数，后续可直接用--resume-training加载")
 
-    # 8. 自动执行测试脚本（对齐train.py）
+    # 8. 自动执行测试脚本（对齐train.py，修改RNN路径）
     test_script_path = os.path.join(project_root, "Scripts", "Chapter4", "test_Joint.py")
     if os.path.exists(test_script_path):
         test_cmd = [
@@ -563,7 +648,7 @@ if __name__ == '__main__':
             "--net-date", str(execute_date),
             "--train-id", str(train_id),
             "--model-prefix", str(best_model_base_name),
-            "--rnn-path", str(args.rnn_path)
+            "--rnn-path", os.path.join(base_path, f"{best_model_base_name}_RNN.pth")  # 使用训练后的RNN
         ]
         print("\n🚀 开始执行JointNet测试脚本...")
         print(" ".join(test_cmd))

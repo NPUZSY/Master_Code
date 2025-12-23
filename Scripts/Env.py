@@ -195,7 +195,7 @@ class Envs(gym.Env):
         # 1) 将动作映射到物理量
         delta_P_fc = self._fc_delta_from_index(action_decoded['fc'])
         P_bat_cmd = self._bat_power_from_index(action_decoded['bat'])  # 智能体选择的锂电池功率
-        sc_on = ~bool(int(action_decoded['sc']) == 1)
+        sc_on = bool(int(action_decoded['sc']) == 1)
         # print(sc_on)
         
 
