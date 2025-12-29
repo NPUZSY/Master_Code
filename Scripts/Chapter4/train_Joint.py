@@ -51,9 +51,9 @@ nohup python Scripts/Chapter4/train_Joint.py \
 --pretrain-date 1223 \
 --pretrain-train-id 0 \
 --epsilon 0.9 \
---lr 1e-4 \
+--lr 1e-5 \
 --pretrain-model-prefix "Joint_Model" \
---episode 2000 > logs/1223_2.log 2>&1 &
+--episode 2000 > logs/1223_3.log 2>&1 &
 
 """
 
