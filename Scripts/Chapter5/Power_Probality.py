@@ -26,9 +26,9 @@ plt.ion()
 SAVE_FIGURES = True
 
 
-# -------------------------- 第一步：提取功率数据 --------------------------
+# -------------------------- Step 1: Extract Power Data --------------------------
 def _build_base_profiles():
-    """从Power_Profile.py中复制的功率生成逻辑，用于获取功率序列"""
+    """Copy power generation logic from Power_Profile.py to obtain power sequences"""
     # 起飞阶段 (0 - 200)
     takeoff_time = np.linspace(0, 200, 200)
     takeoff_time1 = np.linspace(0, 150, 150)
@@ -65,14 +65,14 @@ def _build_base_profiles():
 
 
 def data_read_process():
-    """替代原温度数据处理，改用功率数据"""
-    # 获取功率序列
+    """Replace original temperature data processing with power data"""
+    # Get power sequence
     power = _build_base_profiles()
-    # （可选）添加噪声（与Power_Profile.py的generate_loads逻辑一致）
+    # (Optional) Add noise (consistent with generate_loads logic in Power_Profile.py)
     rnd = np.random.RandomState(seed=1)
     power_noise_std = 80.0
     power_with_noise = power + rnd.normal(0.0, power_noise_std, size=power.shape)
-    # 滤波（可选）
+    # Filtering (optional)
     try:
         power_win = 11 if len(power_with_noise)>=11 else len(power_with_noise)-1
         if power_win%2 ==0: power_win -=1
@@ -80,11 +80,11 @@ def data_read_process():
     except:
         filtered_power = power_with_noise.copy()
 
-    # 功率数据处理（类比原温度逻辑）
+    # Power data processing (analogous to original temperature logic)
     min_power = min(filtered_power)
     max_power = max(filtered_power)
-    power_interval = 100  # 功率区间步长（可根据需求调整）
-    power_interval_sample_interval = 10  # 采样间隔（类比原temp_interval_sample_interval）
+    power_interval = 100  # Power interval step (adjustable as needed)
+    power_interval_sample_interval = 10  # Sampling interval (analogous to original temp_interval_sample_interval)
     num_intervals = int((max_power - min_power) / power_interval) + 1
 
     temp_counts = np.zeros(num_intervals)
@@ -106,7 +106,7 @@ def data_read_process():
     return probability_matrix, min_power, max_power, num_intervals, power_interval, power_probabilities
 
 
-# -------------------------- 以下函数与原代码逻辑一致（仅适配变量名） --------------------------
+# -------------------------- The following functions follow the original logic (only variable names adapted) --------------------------
 def normalize(probability_matrix):
     probability_matrix_normalize = probability_matrix.copy()
     row_sums = np.sum(probability_matrix_normalize, axis=1)
