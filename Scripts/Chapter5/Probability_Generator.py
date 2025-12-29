@@ -188,7 +188,7 @@ def plot_bar(probability_matrix, min_temp, num_intervals, temp_interval, z_label
             # 通用 fallback：设置大尺寸
             manager.resize(1600, 900)
     
-    if SAVE_FIGURES: plt.savefig(f"./Figures/{title}_bar.png", dpi=1200)
+    if SAVE_FIGURES: plt.savefig(f"./Figures/Fig5-3 温度转移概率/{title}_bar.png", dpi=1200)
     plt.ioff()
 
 
@@ -229,11 +229,12 @@ def plot_surf(probability_matrix, min_temp, max_temp, num_intervals, temp_interv
     z_curve = temp_probabilities
     ax.plot(x_curve, [max_temp] * len(x_curve), z_curve, '#FFA500', label='Temperature Transition')
     ax.legend(
-        fontsize=16, 
-        loc='upper right', 
-        bbox_to_anchor=(0.98, 1),  # 可根据需要微调这两个值
-        frameon=True,  # 可选：显示图例边框，更清晰
-        borderaxespad=0.1  # 可选：减小图例与锚点的间距
+        fontsize=10,          # 缩小字体（原16→10，可根据需求调整为8/12）
+        loc='upper right',    # 基础位置
+        bbox_to_anchor=(1.2, 1),  # 往右（x+0.1）、往上（y+0.05）挪动
+        frameon=True,
+        borderaxespad=0.1,
+        framealpha=0.8        # 增加图例透明度，避免遮挡
     )
 
     # 跨平台最大化窗口适配
@@ -249,7 +250,8 @@ def plot_surf(probability_matrix, min_temp, max_temp, num_intervals, temp_interv
             # 通用 fallback：设置大尺寸
             manager.resize(1600, 900)
     
-    if SAVE_FIGURES: plt.savefig(f"./Figures/{title}_surf.png", dpi=1200)
+    if SAVE_FIGURES: plt.savefig(f"./Figures/Fig5-3 温度转移概率/{title}_surf.png", dpi=1200)
+    if SAVE_FIGURES: plt.savefig(f"./Figures/Fig5-3 温度转移概率/{title}_surf.svg", dpi=1200)
     plt.ioff()
 
 
@@ -275,5 +277,5 @@ if __name__ == '__main__':
     plot_bar(probability_matrix_, min_temp_, num_intervals_interpolated, temp_interval, 'Transition Probability', "Normalized Data")
 
     plot_surf(probability_matrix_, min_temp_, max_temp_, num_intervals_interpolated, temp_interval_new,
-              temp_probabilities_, 'Transition Probability', "Normalized Data")
+              temp_probabilities_, 'Transition Probability', "Temperature Transition")
     plt.show()
