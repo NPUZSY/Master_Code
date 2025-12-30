@@ -30,6 +30,14 @@ T_UNDERWATER = 5
 P_AIR_BASE = 2500
 P_SURFACE_BASE = 1000
 P_UNDERWATER_BASE = 3000
+# 功率波动百分比参数（用于基于基础功率计算波动）
+POWER_FLUCTUATION_RATIO_CRUISE = 0.02      # 长航时巡航场景功率波动百分比
+POWER_FLUCTUATION_RATIO_RECON_AIR = 0.02    # 跨域侦察场景空中功率波动百分比
+POWER_FLUCTUATION_RATIO_RECON_SURFACE = 0.02    # 跨域侦察场景水面功率波动百分比
+POWER_FLUCTUATION_RATIO_RECON_UNDERWATER = 0.10    # 跨域侦察场景水下功率波动百分比
+POWER_FLUCTUATION_RATIO_RESCUE = 0.05      # 应急救援场景功率波动百分比
+# 功率波动上限（W）- 确保波动不超过此值
+POWER_FLUCTUATION_MAX = 500      # 所有场景功率波动最大上限
 
 # ===================== 工具函数 =====================
 def generate_bayesian_power(time_points, base_power, scenario_type, mode_type):
@@ -41,16 +49,21 @@ def generate_bayesian_power(time_points, base_power, scenario_type, mode_type):
     :param mode_type: 模态类型（air/surface/underwater）
     :return: 带随机波动的功率数组
     """
-    # 不同场景的波动参数
+    # 不同场景的波动参数（使用全局变量）
     if scenario_type == 'cruise':  # 长航时巡航：小波动
-        std = base_power * 0.05
+        std = min(base_power * POWER_FLUCTUATION_RATIO_CRUISE, POWER_FLUCTUATION_MAX)
     elif scenario_type == 'recon':  # 跨域侦察：水下大波动，其他小波动
-        std = min(base_power * 0.15 if mode_type == 'underwater' else base_power * 0.05, 1000)
+        if mode_type == 'underwater':
+            std = min(base_power * POWER_FLUCTUATION_RATIO_RECON_UNDERWATER, POWER_FLUCTUATION_MAX)
+        elif mode_type == 'air':
+            std = min(base_power * POWER_FLUCTUATION_RATIO_RECON_AIR, POWER_FLUCTUATION_MAX)
+        else:  # surface
+            std = min(base_power * POWER_FLUCTUATION_RATIO_RECON_SURFACE, POWER_FLUCTUATION_MAX)
     elif scenario_type == 'rescue':  # 应急救援：整体大波动+峰值
-        std = min(base_power * 0.2, 1000)
+        std = min(base_power * POWER_FLUCTUATION_RATIO_RESCUE, POWER_FLUCTUATION_MAX)
         peak_factor = 1.3  # 峰值系数
     else:
-        std = base_power * 0.05
+        std = min(base_power * 0.05, POWER_FLUCTUATION_MAX)
 
     # 生成随机波动
     np.random.seed(42)  # 固定随机种子保证可复现
@@ -68,53 +81,67 @@ def generate_bayesian_power(time_points, base_power, scenario_type, mode_type):
 
 def generate_switch_power(time_points, start_power, end_power, switch_type):
     """
-    生成切换模态的功率曲线（复用之前的切换逻辑）
+    生成切换模态的功率曲线（参考Fig5-6的切换逻辑）
     :param time_points: 切换阶段时间点（0~50s）
     :param start_power: 起始模态功率
     :param end_power: 目标模态功率
     :param switch_type: 切换类型（air_to_surface/surface_to_air/air_to_underwater/underwater_to_surface等）
     :return: 切换阶段功率数组
     """
-    power = np.zeros_like(time_points)
+    power = np.zeros_like(time_points, dtype=np.float64)
     for i, ti in enumerate(time_points):
         if ti <= 10:
+            # 过渡前阶段：维持初始功率P1
             power[i] = start_power
         elif ti <= 20:
-            if switch_type in ['air_to_surface', 'surface_to_air', 'air_to_underwater', 'underwater_to_air']:
-                ratio = (ti - 10) / 10
-                if switch_type == 'air_to_surface':
-                    power[i] = start_power + ratio * (1.1 * start_power - start_power)
-                elif switch_type == 'surface_to_air':
-                    power[i] = start_power + ratio * (start_power - start_power)
-                elif switch_type == 'air_to_underwater':
-                    power[i] = start_power
-                elif switch_type == 'underwater_to_air':
-                    power[i] = start_power + ratio * (1.1 * start_power - start_power)
-        elif ti <= 35:
-            ratio = (ti - 20) / 15
+            # 过渡中阶段1：10-20s
+            ratio = (ti - 10) / 10
             if switch_type == 'air_to_surface':
-                power[i] = 1.1 * start_power + ratio * (end_power - 1.1 * start_power)
+                power[i] = start_power + ratio * (1.1 * start_power - start_power)
             elif switch_type == 'surface_to_air':
-                power[i] = start_power + ratio * (end_power - start_power)
+                power[i] = start_power + ratio * (0.9 * start_power - start_power)
             elif switch_type == 'air_to_underwater':
                 power[i] = start_power
             elif switch_type == 'underwater_to_air':
-                power[i] = 1.1 * start_power + ratio * (end_power - 1.1 * start_power)
+                power[i] = start_power + ratio * (1.1 * start_power - start_power)
+            elif switch_type == 'surface_to_underwater':
+                power[i] = start_power + ratio * (1.05 * start_power - start_power)
             elif switch_type == 'underwater_to_surface':
-                power[i] = start_power + ratio * (end_power - start_power)
+                power[i] = start_power + ratio * (0.95 * start_power - start_power)
+        elif ti <= 35:
+            # 过渡中阶段2：20-35s
+            ratio = (ti - 20) / 15
+            if switch_type == 'air_to_surface':
+                power[i] = 1.1 * start_power + ratio * (0.9 * end_power - 1.1 * start_power)
+            elif switch_type == 'surface_to_air':
+                power[i] = 0.9 * start_power + ratio * (2.0 * end_power - 0.9 * start_power)
+            elif switch_type == 'air_to_underwater':
+                power[i] = start_power
+            elif switch_type == 'underwater_to_air':
+                power[i] = 1.1 * start_power + ratio * (2.0 * end_power - 1.1 * start_power)
+            elif switch_type == 'surface_to_underwater':
+                power[i] = 1.05 * start_power + ratio * (1.1 * end_power - 1.05 * start_power)
+            elif switch_type == 'underwater_to_surface':
+                power[i] = 0.95 * start_power + ratio * (0.9 * end_power - 0.95 * start_power)
         elif ti <= 40:
+            # 过渡中阶段3：35-40s
             ratio = (ti - 35) / 5
             if switch_type == 'air_to_surface':
-                power[i] = end_power
+                power[i] = 0.9 * end_power + ratio * (end_power - 0.9 * end_power)
             elif switch_type == 'surface_to_air':
-                power[i] = end_power
+                power[i] = 2.0 * end_power + ratio * (end_power - 2.0 * end_power)
             elif switch_type == 'air_to_underwater':
-                ratio_full = (ti - 25) / 10 if ti > 25 else 0
                 power[i] = end_power
+            elif switch_type == 'underwater_to_air':
+                power[i] = 2.0 * end_power + ratio * (end_power - 2.0 * end_power)
+            elif switch_type == 'surface_to_underwater':
+                power[i] = 1.1 * end_power + ratio * (end_power - 1.1 * end_power)
             elif switch_type == 'underwater_to_surface':
-                power[i] = end_power
+                power[i] = 0.9 * end_power + ratio * (end_power - 0.9 * end_power)
         else:
+            # 过渡后阶段：40-50s，维持目标功率P2
             power[i] = end_power
+    power = np.maximum(power, 0)
     return power
 
 def generate_temperature_curve(time_points, mode_sequence, scenario_type):
@@ -418,6 +445,16 @@ def plot_scenario_profiles():
                         ha='center', va='center', fontsize=9, fontweight='bold',
                         bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
         
+        # 添加基础功率参考线（便于对比不同模态的功率水平）
+        ax1.axhline(y=P_AIR_BASE, color='#1f77b4', linestyle='--', linewidth=1.5, alpha=0.6, label=f'Air Base Power ({P_AIR_BASE}W)')
+        ax1.axhline(y=P_SURFACE_BASE, color='#ff7f0e', linestyle='--', linewidth=1.5, alpha=0.6, label=f'Surface Base Power ({P_SURFACE_BASE}W)')
+        ax1.axhline(y=P_UNDERWATER_BASE, color='#2ca02c', linestyle='--', linewidth=1.5, alpha=0.6, label=f'Underwater Base Power ({P_UNDERWATER_BASE}W)')
+        
+        # 添加温度参考线
+        ax2.axhline(y=T_AIR, color='blue', linestyle=':', linewidth=1.5, alpha=0.6, label=f'Air Temp ({T_AIR}℃)')
+        ax2.axhline(y=T_SURFACE, color='orange', linestyle=':', linewidth=1.5, alpha=0.6, label=f'Surface Temp ({T_SURFACE}℃)')
+        ax2.axhline(y=T_UNDERWATER, color='green', linestyle=':', linewidth=1.5, alpha=0.6, label=f'Underwater Temp ({T_UNDERWATER}℃)')
+        
         # 设置轴属性
         ax1.set_title(scenario_label, fontsize=14, fontweight='bold', pad=10)
         ax1.set_ylabel('Power (W)', fontsize=12, fontweight='bold')
@@ -432,7 +469,7 @@ def plot_scenario_profiles():
         # 合并图例
         lines1, labels1 = ax1.get_legend_handles_labels()
         lines2, labels2 = ax2.get_legend_handles_labels()
-        ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right', fontsize=10, framealpha=0.9)
+        ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right', fontsize=9, framealpha=0.9)
         
         # 美化边框
         ax1.spines['top'].set_visible(False)
