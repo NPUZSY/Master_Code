@@ -4,8 +4,7 @@ import time
 import argparse
 import numpy as np
 
-# 设置环境变量，确保动态链接器能找到正确的libstdc++版本
-os.environ['LD_LIBRARY_PATH'] = '/home/nwpu/miniconda3/envs/Py310/lib:' + os.environ.get('LD_LIBRARY_PATH', '')
+# 系统已修复libstdc++.so.6问题，不再需要环境变量设置
 
 # 添加项目根目录到Python路径
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))

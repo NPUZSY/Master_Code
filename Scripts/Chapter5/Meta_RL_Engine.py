@@ -22,14 +22,6 @@ def setup_matplotlib():
     """
     设置matplotlib环境
     """
-    # 在需要时设置环境变量，确保动态链接器能找到正确的libstdc++版本
-    conda_lib_path = '/home/nwpu/miniconda3/envs/Py310/lib'
-    os.environ['LD_LIBRARY_PATH'] = conda_lib_path + ':' + os.environ.get('LD_LIBRARY_PATH', '')
-    
-    # 确保使用正确的Python路径
-    sys.path.insert(0, conda_lib_path)
-    sys.path.insert(0, os.path.join(conda_lib_path, 'python3.10', 'site-packages'))
-    
     # 导入matplotlib
     import matplotlib
     matplotlib.use('Agg')  # 使用非交互式后端
