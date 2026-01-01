@@ -1,9 +1,5 @@
 import math
-import matplotlib.pyplot as plt
 import numpy as np
-
-plt.rcParams['font.family'] = 'Times New Roman'
-plt.rcParams['font.size'] = 12
 
 
 class Fuel_Cell:
@@ -88,6 +84,11 @@ class FCS:
         for i in range(power.size):
             eff[i] = self.Eng_fuel_func(power[i] / 300 * 1000)
 
+        # 动态导入matplotlib，避免在非可视化环境中出错
+        import matplotlib.pyplot as plt
+        plt.rcParams['font.family'] = 'Times New Roman'
+        plt.rcParams['font.size'] = 12
+        
         fig, ax = plt.subplots()  # 绘制曲线
 
         ax.plot(power, eff)
@@ -107,6 +108,11 @@ class FCS:
 
 
 def main():
+    # 动态导入matplotlib，避免在非可视化环境中出错
+    import matplotlib.pyplot as plt
+    plt.rcParams['font.family'] = 'Times New Roman'
+    plt.rcParams['font.size'] = 12
+    
     FC = Fuel_Cell()
 
     x = np.linspace(0.001, 1.399, num=1399)

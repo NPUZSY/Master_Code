@@ -1,10 +1,6 @@
 import math
-
-import matplotlib.pyplot as plt
 import numpy as np
 from scipy.interpolate import interp1d
-plt.rcParams['font.family'] = 'Times New Roman'
-plt.rcParams['font.size'] = 16
 
 class BatteryPlot:
     def __init__(self, soc=0.6, capacity=1540 * 360, time_step=1e-3):
@@ -27,6 +23,11 @@ class BatteryPlot:
         self.Voltage_f = interp1d(self.soc_x, self.Voltage, kind='cubic')
 
     def plot(self):
+        # 动态导入matplotlib，避免在非可视化环境中出错
+        import matplotlib.pyplot as plt
+        plt.rcParams['font.family'] = 'Times New Roman'
+        plt.rcParams['font.size'] = 16
+        
         fig, ax = plt.subplots()
 
         # 设置左侧Y轴（对应电阻曲线）刻度标签颜色与电阻曲线颜色一致
