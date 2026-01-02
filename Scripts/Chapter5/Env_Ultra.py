@@ -740,6 +740,7 @@ class EnvUltra(gym.Env):
             "r_bat": r_bat,
             "r_match": r_match,
             "eta_fc": eta_fc,
+            "T_amb": T_env,
             "power_diff": power_diff,
             "soc_sc": soc_sc_clamped,
             "current_sc_punish": current_sc_punish,

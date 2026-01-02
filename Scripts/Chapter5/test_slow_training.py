@@ -86,7 +86,7 @@ def test_single_scenario(model, scenario, max_steps=1000, seed=42):
     
     while steps < max_steps:
         # 选择动作
-        state_tensor = torch.FloatTensor(state).unsqueeze(0).unsqueeze(1)
+        state_tensor = torch.FloatTensor(state).unsqueeze(0).unsqueeze(1).to(device)
         fc_action_out, bat_action_out, sc_action_out, _ = model(state_tensor, None)
         
         # 贪婪选择动作
@@ -167,17 +167,17 @@ def plot_power_profiles(results, save_path, show_plot=False):
         'sc': '#8a7ab5'      # 超级电容
     }
     
-    # 模态背景色映射
+    # 模态背景色映射（使用RGBA颜色值，与超级环境Fig5-7保持一致的透明度）
     background_colors = {
-        'air': 'lightblue',
-        'surface': 'lightyellow',
-        'underwater': 'lightgreen',
-        'air_to_surface': 'lightcoral',
-        'surface_to_air': 'lightcoral',
-        'air_to_underwater': 'lightcoral',
-        'underwater_to_air': 'lightcoral',
-        'surface_to_underwater': 'lightcoral',
-        'underwater_to_surface': 'lightcoral'
+        'air': (0.878, 0.925, 0.973, 0.7),  # lightblue with alpha=0.1
+        'surface': (1.0, 1.0, 0.902, 0.7),   # lightyellow with alpha=0.1
+        'underwater': (0.941, 0.973, 0.859, 0.7),  # lightgreen with alpha=0.1
+        'air_to_surface': (1.0, 0.647, 0.0, 0.2),  # orange with alpha=0.2
+        'surface_to_air': (1.0, 0.647, 0.0, 0.2),  # orange with alpha=0.2
+        'air_to_underwater': (1.0, 0.647, 0.0, 0.2),  # orange with alpha=0.2
+        'underwater_to_air': (1.0, 0.647, 0.0, 0.2),  # orange with alpha=0.2
+        'surface_to_underwater': (1.0, 0.647, 0.0, 0.2),  # orange with alpha=0.2
+        'underwater_to_surface': (1.0, 0.647, 0.0, 0.2)   # orange with alpha=0.2
     }
     
     # 绘制每个子图
@@ -292,7 +292,7 @@ def main():
     print(f"✅ 所有场景测试结果已保存到: {all_results_path}")
     
     # 绘制3x3功率分配结果图
-    plot_path = os.path.join(save_dir, "power_distribution_9_scenarios.png")
+    plot_path = os.path.join(save_dir, "power_distribution_9_scenarios.svg")
     plot_power_profiles(test_results, plot_path, show_plot=args.show_plot)
     
     print(f"\n✅ 慢学习模型测试完成！所有结果已保存到: {save_dir}")

@@ -200,10 +200,10 @@ class SlowTrainer:
 def main():
     # 解析命令行参数
     parser = argparse.ArgumentParser(description='慢训练脚本')
-    parser.add_argument('--num-epochs', type=int, default=2000, help='训练迭代次数')
-    parser.add_argument('--lr', type=float, default=1e-4, help='学习率')
+    parser.add_argument('--num-epochs', type=int, default=1000, help='训练迭代次数')
+    parser.add_argument('--lr', type=float, default=5e-5, help='学习率')
     parser.add_argument('--hidden-dim', type=int, default=512, help='隐藏层维度')
-    parser.add_argument('--gamma', type=float, default=0.99, help='折扣因子')
+    parser.add_argument('--gamma', type=float, default=0.95, help='折扣因子')
     parser.add_argument('--output-dir', type=str, default='', help='输出目录')
     parser.add_argument('--eval-interval', type=int, default=50, help='评估间隔')
     parser.add_argument('--save-interval', type=int, default=100, help='模型保存间隔')
