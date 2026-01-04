@@ -7,6 +7,25 @@ from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor
 import threading
 
+# 示例代码
+'''
+从零开始
+nohup python Scripts/Chapter5/slow_training.py \
+--num-epochs 5000 \
+> logs/0103/0103_1.log 2>&1 &
+
+--load-model-path /home/siyu/Master_Code/nets/Chap5/slow_training/0101_200526/slow_training_model_best.pth \
+
+从joint_net开始
+nohup python Scripts/Chapter5/slow_training.py \
+--num-epochs 5 \
+--from-joint-net /home/siyu/Master_Code/nets/Chap4/Joint_Net/1223/2 \
+--num-epochs 1000 \
+> logs/0103/0103_2.log 2>&1 &
+
+
+'''
+
 # 添加项目根目录到Python路径
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
@@ -16,14 +35,129 @@ import torch.optim as optim
 
 # 导入公共组件
 from Scripts.Chapter5.Meta_RL_Engine import (
-    MetaRLEnvironment,
     MetaRLPolicy,
     ResultSaver,
     create_output_dir,
     get_project_root
 )
-from Scripts.Chapter3.MARL_Engine import device
+from Scripts.Chapter3.MARL_Engine import device, Net
+from Scripts.Chapter4.Joint_Net import MultiTaskRNN, JointNet
 from Scripts.Chapter5.Env_Ultra import EnvUltra
+
+# ----------------------------------------------------
+# 工具函数：从JointNet加载参数到慢学习网络
+# ----------------------------------------------------
+def load_params_from_joint_net(joint_net_dir, policy):
+    """
+    从JointNet模型目录加载参数并迁移到MetaRLPolicy网络
+    
+    Args:
+        joint_net_dir: JointNet模型目录路径
+        policy: 要加载参数的MetaRLPolicy网络
+    """
+    print(f"📌 开始从JointNet加载参数: {joint_net_dir}")
+    
+    # 1. 加载JointNet的三个智能体模型
+    agent_names = ["FC", "BAT", "SC"]
+    joint_agents = {}
+    
+    for name in agent_names:
+        # 尝试加载模型文件
+        model_path = os.path.join(joint_net_dir, f"Joint_Model_{name}.pth")
+        if not os.path.exists(model_path):
+            # 尝试使用其他文件名格式
+            model_path = os.path.join(joint_net_dir, f"slow_training_model_best_{name}.pth")
+            if not os.path.exists(model_path):
+                raise FileNotFoundError(f"JointNet模型文件不存在: {model_path}")
+        
+        # 加载JointNet模型
+        try:
+            # 创建临时的JointNet结构来加载参数
+            temp_rnn = MultiTaskRNN()
+            temp_marl = Net(N_STATES=65, N_ACTIONS=32 if name == "FC" else 40 if name == "BAT" else 2)
+            temp_joint_net = JointNet(temp_rnn, temp_marl)
+            
+            temp_joint_net.load_state_dict(torch.load(model_path, map_location=device))
+            joint_agents[name] = temp_joint_net
+            print(f"✅ 成功加载{name}智能体模型: {model_path}")
+        except Exception as e:
+            print(f"❌ 加载{name}智能体模型失败: {e}")
+            raise
+    
+    # 2. 获取慢学习网络的当前参数
+    slow_state_dict = policy.state_dict()
+    
+    # 3. 从JointNet模型中提取MARL头部参数并迁移到慢学习网络
+    print("\n🔄 开始迁移MARL头部参数...")
+    
+    # 为每个智能体迁移输出层参数
+    for name in agent_names:
+        joint_marl_state_dict = joint_agents[name].marl_part.state_dict()
+        
+        # 映射到慢学习网络的对应输出层
+        if name == "FC":
+            slow_output_prefix = "fc_fc"
+        elif name == "BAT":
+            slow_output_prefix = "fc_bat"
+        else:  # SC
+            slow_output_prefix = "fc_sc"
+        
+        # 迁移output参数到对应的输出层
+        if "output.weight" in joint_marl_state_dict and f"{slow_output_prefix}.weight" in slow_state_dict:
+            # 获取JointNet的output层参数
+            joint_output_weight = joint_marl_state_dict["output.weight"]  # shape: (action_dim, 64)
+            
+            # 迁移到慢学习网络的输出层
+            # 慢学习网络的输出层输入是32维（fc_feature3的输出）
+            # 我们只使用JointNet output层的前32个输入通道
+            slow_state_dict[f"{slow_output_prefix}.weight"][:, :32] = joint_output_weight[:, :32]
+            
+            # 迁移偏置项
+            if "output.bias" in joint_marl_state_dict and f"{slow_output_prefix}.bias" in slow_state_dict:
+                slow_state_dict[f"{slow_output_prefix}.bias"] = joint_marl_state_dict["output.bias"]
+            
+            print(f"   ✅ 迁移{name}智能体的output参数到{slow_output_prefix}")
+    
+    # 只迁移FC智能体的中间层参数到慢学习网络的特征提取层
+    print("\n🔄 开始迁移中间层参数...")
+    fc_marl_state_dict = joint_agents["FC"].marl_part.state_dict()
+    
+    # 迁移lay1参数到fc_feature3
+    if "lay1.weight" in fc_marl_state_dict and "fc_feature3.weight" in slow_state_dict:
+        # 获取JointNet的lay1层参数
+        joint_lay1_weight = fc_marl_state_dict["lay1.weight"]  # shape: (64, 64)
+        
+        # 慢学习网络的fc_feature3输入是64维，输出是32维
+        # 我们只使用JointNet lay1层的前32个输出通道和前32个输入通道
+        slow_state_dict["fc_feature3.weight"][:, :32] = joint_lay1_weight[:32, :32]
+        
+        # 迁移偏置项
+        if "lay1.bias" in fc_marl_state_dict and "fc_feature3.bias" in slow_state_dict:
+            slow_state_dict["fc_feature3.bias"][:32] = fc_marl_state_dict["lay1.bias"][:32]
+        
+        print(f"   ✅ 迁移FC智能体的lay1参数到fc_feature3")
+    
+    # 迁移input层参数到fc_feature2
+    if "input.weight" in fc_marl_state_dict and "fc_feature2.weight" in slow_state_dict:
+        # 获取JointNet的input层参数
+        joint_input_weight = fc_marl_state_dict["input.weight"]  # shape: (64, 65)
+        
+        # 慢学习网络的fc_feature2输入是128维，输出是64维
+        # 我们只使用JointNet input层的前64个输出通道和前64个输入通道
+        # 注意：JointNet的input层输入是65维（64+1），我们跳过reg_out部分，只使用64维特征
+        slow_state_dict["fc_feature2.weight"][:64, :64] = joint_input_weight[:, 1:65]  # 跳过JointNet的reg_out部分
+        
+        # 迁移偏置项
+        if "input.bias" in fc_marl_state_dict and "fc_feature2.bias" in slow_state_dict:
+            slow_state_dict["fc_feature2.bias"][:64] = fc_marl_state_dict["input.bias"]
+        
+        print(f"   ✅ 迁移FC智能体的input参数到fc_feature2")
+    
+    # 4. 更新慢学习网络的所有参数
+    policy.load_state_dict(slow_state_dict)
+    
+    print("\n✅ 所有JointNet参数迁移完成！")
+    return policy
 
 # ----------------------------------------------------
 # 慢训练算法类
@@ -32,10 +166,16 @@ class SlowTrainer:
     """
     慢训练算法类，专注于在多种模态上进行扎实的慢训练
     """
-    def __init__(self, policy, lr=5e-5, gamma=0.99, hidden_dim=256, num_workers=9):
+    def __init__(self, policy, lr=5e-4, gamma=0.99, hidden_dim=256, num_workers=9):
         self.policy = policy
         # 使用Adam优化器，带有权重衰减
         self.optimizer = optim.Adam(self.policy.parameters(), lr=lr, weight_decay=1e-5)
+        # 添加学习率调度器，当奖励连续100轮不提升时，学习率乘以0.5
+        self.lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            self.optimizer, mode='max', patience=500, factor=0.5
+        )
+        # 跟踪当前学习率，用于日志提示
+        self.current_lr = lr
         self.gamma = gamma
         # 使用Huber损失，对异常值更鲁棒
         self.loss_func = nn.SmoothL1Loss()
@@ -177,6 +317,15 @@ class SlowTrainer:
             avg_reward = np.mean(epoch_rewards)
             training_rewards.append(avg_reward)
             
+            # 更新学习率调度器
+            self.lr_scheduler.step(avg_reward)
+            
+            # 检查学习率是否变化并输出日志
+            new_lr = self.optimizer.param_groups[0]['lr']
+            if new_lr != self.current_lr:
+                print(f"📉 学习率已更新: {self.current_lr:.6f} → {new_lr:.6f}")
+                self.current_lr = new_lr
+            
             # 每eval_interval次迭代进行一次评估
             if epoch % eval_interval == 0:
                 print(f"Epoch {epoch}, Average Reward: {avg_reward:.4f}, Best Avg Reward: {best_avg_reward:.4f}")
@@ -201,14 +350,24 @@ def main():
     # 解析命令行参数
     parser = argparse.ArgumentParser(description='慢训练脚本')
     parser.add_argument('--num-epochs', type=int, default=1000, help='训练迭代次数')
-    parser.add_argument('--lr', type=float, default=5e-5, help='学习率')
+    parser.add_argument('--lr', type=float, default=5e-4, help='学习率')
     parser.add_argument('--hidden-dim', type=int, default=512, help='隐藏层维度')
     parser.add_argument('--gamma', type=float, default=0.95, help='折扣因子')
     parser.add_argument('--output-dir', type=str, default='', help='输出目录')
     parser.add_argument('--eval-interval', type=int, default=50, help='评估间隔')
     parser.add_argument('--save-interval', type=int, default=100, help='模型保存间隔')
     parser.add_argument('--num-workers', type=int, default=9, help='训练线程数')
+    parser.add_argument('--seed', type=int, default=42, help='随机种子，用于确保训练可复现')
+    parser.add_argument('--load-model-path', type=str, default='', help='要加载的预训练慢学习模型路径，用于继续训练')
+    parser.add_argument('--from-joint-net', type=str, default='', help='要加载的JointNet模型目录，用于从JointNet继续训练')
     args = parser.parse_args()
+    
+    # 设置随机种子
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed) if torch.cuda.is_available() else None
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
     
     # 创建输出目录
     if not args.output_dir:
@@ -221,6 +380,35 @@ def main():
     
     # 初始化策略网络并移动到设备上
     policy = MetaRLPolicy(hidden_dim=args.hidden_dim).to(device)
+    
+    # 加载预训练模型（如果提供）
+    if args.load_model_path and args.from_joint_net:
+        print("❌ 错误：--load-model-path 和 --from-joint-net 不能同时使用")
+        raise ValueError("--load-model-path 和 --from-joint-net 不能同时使用")
+    elif args.load_model_path:
+        # 从慢学习模型加载
+        if os.path.exists(args.load_model_path):
+            try:
+                policy.load_state_dict(torch.load(args.load_model_path, map_location=device))
+                print(f"✅ 成功加载预训练慢学习模型: {args.load_model_path}")
+            except Exception as e:
+                print(f"❌ 加载预训练慢学习模型失败: {e}")
+                raise
+        else:
+            print(f"❌ 预训练模型文件不存在: {args.load_model_path}")
+            raise FileNotFoundError(f"预训练模型文件不存在: {args.load_model_path}")
+    elif args.from_joint_net:
+        # 从JointNet模型加载参数
+        if os.path.exists(args.from_joint_net):
+            try:
+                policy = load_params_from_joint_net(args.from_joint_net, policy)
+                print(f"✅ 成功从JointNet加载参数: {args.from_joint_net}")
+            except Exception as e:
+                print(f"❌ 从JointNet加载参数失败: {e}")
+                raise
+        else:
+            print(f"❌ JointNet模型目录不存在: {args.from_joint_net}")
+            raise FileNotFoundError(f"JointNet模型目录不存在: {args.from_joint_net}")
     
     # 初始化慢训练器
     trainer = SlowTrainer(policy, lr=args.lr, gamma=args.gamma, hidden_dim=args.hidden_dim, num_workers=args.num_workers)

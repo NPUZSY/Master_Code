@@ -11,8 +11,10 @@ from json import JSONEncoder  # 新增：导入JSON编码器基类
 # 导入公共模块（与训练代码保持一致的导入形式）
 from MARL_Engine import setup_project_root, device, IndependentDQN
 project_root = setup_project_root()
-from Scripts.Env import Envs
 from Scripts.utils.global_utils import *
+
+# 支持超级环境
+from Scripts.Chapter5.Env_Ultra import EnvUltra
 # 获取字体（优先宋体+Times New Roman，解决中文/负号显示）
 font_get()
 
@@ -39,7 +41,7 @@ class NumpyEncoder(JSONEncoder):
 # ====================== 命令行参数解析 ======================
 def parse_args():
     """解析命令行参数（指定待测试模型路径）"""
-    parser = argparse.ArgumentParser(description='MARL模型测试脚本（支持指定待测试模型路径）')
+    parser = argparse.ArgumentParser(description='MARL模型测试脚本（支持指定待测试模型路径和超级环境）')
     
     # 核心：模型路径参数（必选/可选）
     parser.add_argument('--net-date', type=str, required=True,
@@ -47,7 +49,15 @@ def parse_args():
     parser.add_argument('--train-id', type=str, required=True,
                         help='模型对应的训练ID（必填，如：11）')
     
-    # 测试示例脚本python Scripts/Chapter3/test.py --net-date 1218 --train-id 9
+    # 新增：超级环境参数
+    parser.add_argument('--use-ultra-env', action='store_true',
+                        help='是否使用超级环境（EnvUltra）')
+    parser.add_argument('--scenario', type=str, default='default',
+                        help='超级环境场景类型（如：cruise, recon, rescue等，default表示经典环境）')
+    
+    # 测试示例脚本
+    # python Scripts/Chapter3/test.py --net-date 1218 --train-id 9
+    # python Scripts/Chapter3/test.py --net-date 1218 --train-id 9 --use-ultra-env --scenario cruise
     
     # 可选配置参数
     parser.add_argument('--model-prefix', type=str, default="MARL_Model", help='模型前缀')
@@ -89,7 +99,15 @@ if __name__ == '__main__':
     print("=" * 80 + "\n")
 
     # 初始化环境
-    env = Envs()
+    if args.use_ultra_env:
+        # 使用超级环境
+        env = EnvUltra(scenario_type=args.scenario)
+        print(f"✅ 使用超级环境 EnvUltra，场景: {args.scenario}")
+    else:
+        # 使用经典环境
+        from Scripts.Env import Envs
+        env = Envs()
+        print(f"✅ 使用经典环境 Envs")
     
     # 动态获取状态维度（与训练代码保持一致）
     N_STATES = env.observation_space.shape[0]

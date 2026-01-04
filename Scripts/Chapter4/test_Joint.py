@@ -23,8 +23,10 @@ project_root = setup_path()
 
 # 导入原有引擎组件
 from Scripts.Chapter3.MARL_Engine import Net, IndependentDQN, device
-from Scripts.Env import Envs
 from Scripts.utils.global_utils import font_get
+
+# 支持超级环境
+from Scripts.Chapter5.Env_Ultra import EnvUltra
 
 # 获取字体设置
 font_get()
@@ -99,7 +101,7 @@ class NumpyEncoder(JSONEncoder):
 
 def parse_args():
     """解析命令行参数（指定待测试模型路径）"""
-    parser = argparse.ArgumentParser(description='JointNet模型测试脚本（支持指定待测试模型路径）')
+    parser = argparse.ArgumentParser(description='JointNet模型测试脚本（支持超级环境）')
     
     # 核心：模型路径参数（必选/可选）
     parser.add_argument('--net-date', type=str, required=True,
@@ -109,6 +111,12 @@ def parse_args():
     parser.add_argument('--rnn-path', type=str, 
                         default=os.path.join(project_root, "nets/Chap4/RNN_Reg_Opt_MultiTask/1216/17/rnn_classifier_multitask.pth"),
                         help='预训练RNN模型路径')
+    
+    # 新增：超级环境参数
+    parser.add_argument('--use-ultra-env', action='store_true',
+                        help='是否使用超级环境（EnvUltra）')
+    parser.add_argument('--scenario', type=str, default='default',
+                        help='超级环境场景类型（如：cruise, recon, rescue等，default表示经典环境）')
     
     # 可选配置参数
     parser.add_argument('--model-prefix', type=str, default="Joint_Model", help='模型前缀')
@@ -146,7 +154,16 @@ if __name__ == '__main__':
     torch.manual_seed(args.seed)
     
     # 初始化环境
-    env = Envs()
+    if args.use_ultra_env:
+        # 使用超级环境
+        env = EnvUltra(scenario_type=args.scenario)
+        print(f"✅ 使用超级环境 EnvUltra，场景: {args.scenario}")
+    else:
+        # 使用经典环境
+        from Scripts.Env import Envs
+        env = Envs()
+        print(f"✅ 使用经典环境 Envs")
+    
     dt = getattr(env, "dt", 1.0)
     loads = env.loads
     temperature = env.temperature

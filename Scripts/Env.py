@@ -124,7 +124,7 @@ class Envs(gym.Env):
     def _fc_delta_from_index(self, idx):
         # FC 动作索引 0..31 对应 k in [-15,..,16]
         k = self.K_FC_MIN + int(idx)
-        # 变化率步长为 0.005 * P_FC_MAX
+        # 变化率步长为 0.001 * P_FC_MAX
         delta = k * 0.001 * self.P_FC_MAX
         return float(delta)
 

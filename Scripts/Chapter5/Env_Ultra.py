@@ -44,11 +44,16 @@ class EnvUltra(gym.Env):
       3. 支持通过 scenario_type 参数选择不同场景
     """
 
-    SCENARIO_TYPES = ['cruise', 'recon', 'rescue',
-                      'air', 'surface', 'underwater',
-                      'air_to_surface', 'surface_to_air',
-                      'air_to_underwater', 'underwater_to_air',
-                      'surface_to_underwater', 'underwater_to_surface']
+    # 经典环境场景类型（兼容旧智能体）
+    CLASSIC_SCENARIO_TYPES = ['default']
+    # 超级环境场景类型
+    ADVANCED_SCENARIO_TYPES = ['cruise', 'recon', 'rescue',
+                              'air', 'surface', 'underwater',
+                              'air_to_surface', 'surface_to_air',
+                              'air_to_underwater', 'underwater_to_air',
+                              'surface_to_underwater', 'underwater_to_surface']
+    # 合并所有场景类型
+    SCENARIO_TYPES = CLASSIC_SCENARIO_TYPES + ADVANCED_SCENARIO_TYPES
 
     def __init__(self, scenario_type='cruise'):
         super().__init__()
@@ -115,6 +120,30 @@ class EnvUltra(gym.Env):
 
     def _build_scenario_profiles(self):
         """构建场景功率和温度剖面"""
+        # 处理经典环境的默认场景
+        if self.scenario_type == 'default':
+            # 使用经典环境的功率剖面生成方式
+            try:
+                from Scripts.Power_Profile import UAV_Load
+                loads_data = UAV_Load.get_loads()
+                self.temperature = loads_data[0]
+                self.power_profile = loads_data[1]
+                self.loads = self.power_profile  # 确保设置self.loads属性
+                self.mode_annotations = [{'type': 'surface', 'start': 0, 'end': len(self.power_profile)}]
+                self.step_length = len(self.power_profile)
+                return
+            except Exception as e:
+                # 如果导入失败，使用默认值
+                print(f"警告: 无法加载 UAV_Load, 使用默认值。错误: {e}")
+                self.TOTAL_DURATION = 600
+                self.temperature = np.array([25.0] * self.TOTAL_DURATION)
+                self.power_profile = np.array([1000.0] * self.TOTAL_DURATION)
+                self.loads = self.power_profile  # 确保设置self.loads属性
+                self.mode_annotations = [{'type': 'surface', 'start': 0, 'end': self.TOTAL_DURATION}]
+                self.step_length = self.TOTAL_DURATION
+                return
+        
+        # 超级环境的场景处理
         self.TOTAL_DURATION = 1800
         self.SWITCH_DURATION = 50
         self.T_AIR = 0
