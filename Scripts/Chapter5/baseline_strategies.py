@@ -153,10 +153,8 @@ class BaselineStrategies:
         final_power_diff = P_load - best_power - bat_power
         
         # 超级电容仅在锂电池SOC过高或过低时接入系统
-        # 亏电状态（SOC < 0.2）或满电状态（SOC >= 0.9）
-        sc_on = True
-        
-        sc_action = 1 if sc_on else 0
+        # 亏电状态（SOC < 0.2）或满电状态（SOC >= 0.9）        
+        sc_action = 1 
         
         return [best_idx, bat_idx, sc_action]
     

@@ -53,83 +53,88 @@ def parse_args():
     
     # 可选配置参数
     parser.add_argument('--seed', type=int, default=42, help='随机种子（默认：42）')
-    parser.add_argument('--max-steps', type=int, default=1000, help='每个模态的最大测试步数（默认：1000）')
+    parser.add_argument('--max-steps', type=int, default=1800, help='每个模态的最大测试步数（默认：1800）')
+    parser.add_argument('--episodes', type=int, default=1, help='测试回合数（默认：1）')
     parser.add_argument('--show-plot', action='store_true', help='是否显示测试结果图（默认：仅保存不显示）')
     parser.add_argument('--save-dir', type=str, default=None, help='结果保存目录（默认：模型所在目录）')
     
     return parser.parse_args()
 
 # ====================== 3. 测试核心功能 ======================
-def test_single_scenario(model, scenario, max_steps=1000, seed=42):
-    """测试单个场景"""
+def test_single_scenario(model, scenario, max_steps=1800, seed=42, episodes=1):
+    """测试单个场景，支持多回合"""
     # 设置随机种子
     torch.manual_seed(seed)
     np.random.seed(seed)
     
-    # 创建环境
-    env = EnvUltra(scenario_type=scenario)
-    state = env.reset()
-    
-    # 初始化数据收集列表
-    times = []
-    power_fc = []
-    power_bat = []
-    power_sc = []
-    load_demand = []
-    temperature = []
-    soc_bat = []
-    soc_sc = []
-    rewards = []
-    
+    # 初始化总统计
     total_reward = 0.0
-    steps = 0
+    total_steps = 0
     
-    while steps < max_steps:
-        # 选择动作
-        state_tensor = torch.FloatTensor(state).unsqueeze(0).unsqueeze(1).to(device)
-        fc_action_out, bat_action_out, sc_action_out, _ = model(state_tensor, None)
-        
-        # 贪婪选择动作
-        fc_action = torch.argmax(fc_action_out, dim=1).item()
-        bat_action = torch.argmax(bat_action_out, dim=1).item()
-        sc_action = torch.argmax(sc_action_out, dim=1).item()
-        
-        action_list = [fc_action, bat_action, sc_action]
-        
-        # 执行动作
-        next_state, reward, done, info = env.step(action_list)
-        
-        # 记录数据
-        times.append(steps)
-        power_fc.append(info['P_fc'])
-        power_bat.append(info['P_bat'])
-        power_sc.append(info['P_sc'])
-        load_demand.append(info['P_load'])
-        temperature.append(info['T_amb'])
-        soc_bat.append(next_state[5])  # 假设state[5]是电池SOC
-        soc_sc.append(next_state[6])  # 假设state[6]是超级电容SOC
-        rewards.append(reward)
-        
-        total_reward += reward
-        state = next_state
-        steps += 1
-        
-        if done:
-            break
+    # 保存所有回合的数据
+    all_episodes_data = []
     
-    # 计算统计指标
-    avg_reward = total_reward / steps if steps > 0 else 0.0
-    total_unmatched_power = sum(abs(ld - (fc + bat + sc)) for ld, fc, bat, sc in zip(load_demand, power_fc, power_bat, power_sc))
-    avg_unmatched_power = total_unmatched_power / steps if steps > 0 else 0.0
-    
-    test_results = {
-        "scenario": scenario,
-        "total_steps": steps,
-        "total_reward": total_reward,
-        "average_reward": avg_reward,
-        "total_unmatched_power": total_unmatched_power,
-        "average_unmatched_power": avg_unmatched_power,
-        "raw_data": {
+    for episode in range(episodes):
+        print(f"\n--- 回合 {episode+1}/{episodes} ---")
+        
+        # 创建环境
+        env = EnvUltra(scenario_type=scenario)
+        state = env.reset()
+        
+        # 初始化数据收集列表
+        times = []
+        power_fc = []
+        power_bat = []
+        power_sc = []
+        load_demand = []
+        temperature = []
+        soc_bat = []
+        soc_sc = []
+        rewards = []
+        
+        episode_reward = 0.0
+        episode_steps = 0
+        
+        while episode_steps < max_steps:
+            # 选择动作
+            state_tensor = torch.FloatTensor(state).unsqueeze(0).unsqueeze(1).to(device)
+            fc_action_out, bat_action_out, sc_action_out, _ = model(state_tensor, None)
+            
+            # 贪婪选择动作
+            fc_action = torch.argmax(fc_action_out, dim=1).item()
+            bat_action = torch.argmax(bat_action_out, dim=1).item()
+            sc_action = torch.argmax(sc_action_out, dim=1).item()
+            
+            action_list = [fc_action, bat_action, sc_action]
+            
+            # 执行动作
+            next_state, reward, done, info = env.step(action_list)
+            
+            # 记录数据
+            times.append(episode_steps)
+            power_fc.append(info['P_fc'])
+            power_bat.append(info['P_bat'])
+            power_sc.append(info['P_sc'])
+            load_demand.append(info['P_load'])
+            temperature.append(info['T_amb'])
+            soc_bat.append(next_state[5])  # 假设state[5]是电池SOC
+            soc_sc.append(next_state[6])  # 假设state[6]是超级电容SOC
+            rewards.append(reward)
+            
+            episode_reward += reward
+            state = next_state
+            episode_steps += 1
+            
+            if done:
+                break
+        
+        # 更新总统计
+        total_reward += episode_reward
+        total_steps += episode_steps
+        
+        # 保存回合数据
+        all_episodes_data.append({
+            "episode": episode+1,
             "times": times,
             "power_fc": power_fc,
             "power_bat": power_bat,
@@ -138,8 +143,50 @@ def test_single_scenario(model, scenario, max_steps=1000, seed=42):
             "temperature": temperature,
             "soc_bat": soc_bat,
             "soc_sc": soc_sc,
-            "rewards": rewards
-        }
+            "rewards": rewards,
+            "total_reward": episode_reward,
+            "steps": episode_steps
+        })
+        
+        print(f"✅ 回合 {episode+1} 完成，奖励: {episode_reward:.2f}，步数: {episode_steps}")
+    
+    # 计算统计指标
+    avg_reward = total_reward / total_steps if total_steps > 0 else 0.0
+    
+    # 计算功率不匹配度（只使用第一个回合的数据，因为绘图需要）
+    if all_episodes_data:
+        first_episode = all_episodes_data[0]
+        total_unmatched_power = sum(abs(ld - (fc + bat + sc)) for ld, fc, bat, sc in zip(
+            first_episode['load_demand'], 
+            first_episode['power_fc'], 
+            first_episode['power_bat'], 
+            first_episode['power_sc']
+        ))
+        avg_unmatched_power = total_unmatched_power / first_episode['steps'] if first_episode['steps'] > 0 else 0.0
+    else:
+        total_unmatched_power = 0.0
+        avg_unmatched_power = 0.0
+    
+    test_results = {
+        "scenario": scenario,
+        "total_steps": total_steps,
+        "total_reward": total_reward,
+        "average_reward": avg_reward,
+        "total_unmatched_power": total_unmatched_power,
+        "average_unmatched_power": avg_unmatched_power,
+        "episodes": episodes,
+        "raw_data": {
+            "times": first_episode['times'] if all_episodes_data else [],
+            "power_fc": first_episode['power_fc'] if all_episodes_data else [],
+            "power_bat": first_episode['power_bat'] if all_episodes_data else [],
+            "power_sc": first_episode['power_sc'] if all_episodes_data else [],
+            "load_demand": first_episode['load_demand'] if all_episodes_data else [],
+            "temperature": first_episode['temperature'] if all_episodes_data else [],
+            "soc_bat": first_episode['soc_bat'] if all_episodes_data else [],
+            "soc_sc": first_episode['soc_sc'] if all_episodes_data else [],
+            "rewards": first_episode['rewards'] if all_episodes_data else []
+        },
+        "all_episodes": all_episodes_data
     }
     
     return test_results
@@ -276,7 +323,7 @@ def main():
     test_results = {}
     for scenario in scenarios:
         print(f"🚀 测试场景: {scenario}")
-        result = test_single_scenario(model, scenario, max_steps=args.max_steps, seed=args.seed)
+        result = test_single_scenario(model, scenario, max_steps=args.max_steps, seed=args.seed, episodes=args.episodes)
         test_results[scenario] = result
         
         # 保存单个场景的JSON结果

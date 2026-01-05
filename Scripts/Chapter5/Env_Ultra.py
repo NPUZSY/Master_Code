@@ -1,3 +1,4 @@
+from typing import Any
 import numpy as np
 import math
 import gymnasium as gym
@@ -880,7 +881,7 @@ class EnvUltra(gym.Env):
         def surface_to_underwater(t, P1=P_water_surface, P2=P_underwater):
             """水面-水下切换模态：P1→1.05P1→1.1P2→P2"""
             power = np.zeros_like(t, dtype=np.float64)
-            for i, ti in enumerate(t):
+            for i, ti in enumerate[Any](t):
                 if ti <= 10:
                     power[i] = P1
                 elif ti <= 25:

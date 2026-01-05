@@ -11,10 +11,9 @@ import threading
 '''
 从零开始
 nohup python Scripts/Chapter5/slow_training.py \
---num-epochs 5000 \
-> logs/0103/0103_1.log 2>&1 &
-
---load-model-path /home/siyu/Master_Code/nets/Chap5/slow_training/0101_200526/slow_training_model_best.pth \
+--num-epochs 1000 \
+--load-model-path /home/siyu/Master_Code/nets/Chap5/slow_training/0105_113601/slow_training_model_best.pth \
+> logs/0105/0105_1.log 2>&1 &
 
 从joint_net开始
 nohup python Scripts/Chapter5/slow_training.py \
@@ -479,6 +478,49 @@ def main():
     }
     config_path = result_saver.save_results_json(config, "slow_training_config.json")
     print(f"✅ 训练配置已保存到: {config_path}")
+    
+    # 生成快学习超参数
+    fast_learning_hyperparams = {
+        # 基础学习超参数
+        "lr": args.lr * 0.1,  # 快学习使用较小的学习率
+        "gamma": args.gamma,
+        "hidden_dim": args.hidden_dim,
+        "batch_size": 32,
+        "update_steps": 10,  # 每次更新的步数
+        
+        # KL散度相关参数
+        "kl_threshold": 0.3,  # 更新触发KL散度阈值
+        "window_size": 100,  # 滑动窗口大小
+        "kl_weight_temp": 0.5,  # 温度KL散度权重
+        "kl_weight_power": 0.5,  # 功率需求KL散度权重
+        
+        # 性能指标阈值
+        "power_matching_threshold": 0.9,  # 功率供需匹配度阈值
+        "hydrogen_growth_threshold": 0.1,  # 等效氢耗增长率阈值
+        "soc_fluctuation_threshold": 0.08,  # 锂电池SOC波动幅度阈值
+        "performance_check_steps": 50,  # 性能检查步数
+        
+        # 更新流程参数
+        "backup_params": True,  # 是否备份参数
+        "optimize_all_params": True,  # 是否优化所有参数
+        "validation_steps": 100,  # 验证步数
+        "success_reward_iterations": 10,  # 连续成功迭代次数
+        
+        # 核密度估计参数
+        "kernel_bandwidth_temp": 2.0,  # 温度带宽
+        "kernel_bandwidth_power": 50.0,  # 功率需求带宽
+        "density_estimation_method": "gaussian",  # 核密度估计方法
+        
+        # 元学习相关参数
+        "meta_lr": args.lr * 0.01,  # 元学习率
+        "meta_steps": 5,  # 元学习步数
+        "adaptation_steps": 200,  # 适配步数
+        "performance_recovery_rate": 0.98  # 性能恢复率
+    }
+    
+    # 保存快学习超参数
+    fast_hyperparams_path = result_saver.save_results_json(fast_learning_hyperparams, "fast_learning_hyperparams.json")
+    print(f"✅ 快学习超参数已保存到: {fast_hyperparams_path}")
     
     print(f"\n所有结果已保存到: {output_dir}")
     
