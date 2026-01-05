@@ -163,7 +163,7 @@ class FastAdaptationTrainer:
             "kl_weight_temp": 0.5,
             "kl_weight_power": 0.5,
             "power_matching_threshold": 0.9,
-            "hydrogen_growth_threshold": 0.1,
+            "hydrogen_growth_threshold": 0.01,
             "soc_fluctuation_threshold": 0.08,
             "performance_check_steps": 50,
             "backup_params": True,
@@ -343,6 +343,23 @@ class FastAdaptationTrainer:
         if len(self.performance_metrics['soc_fluctuation']) > self.hyperparams['performance_check_steps']:
             self.performance_metrics['soc_fluctuation'].pop(0)
     
+    def _reset_sliding_window(self):
+        """
+        重置滑动窗口
+        """
+        self.temp_window = []  # 温度滑动窗口
+        self.power_window = []  # 功率需求滑动窗口
+    
+    def _reset_performance_metrics(self):
+        """
+        重置性能指标
+        """
+        self.performance_metrics = {
+            'power_matching': [],
+            'hydrogen_growth': [],
+            'soc_fluctuation': []
+        }
+    
     def _check_performance_thresholds(self):
         """
         检查性能指标是否超过阈值
@@ -509,6 +526,9 @@ class FastAdaptationTrainer:
         """
         print(f"\n=== 测试场景: {scenario}, 回合数: {episodes} ===")
         
+        # 记录测试开始时间
+        test_start_time = time.time()
+        
         # 初始化总奖励和总步数
         total_reward = 0.0
         total_steps = 0
@@ -537,8 +557,11 @@ class FastAdaptationTrainer:
                 'soc_bat': [],
                 'soc_sc': [],
                 'kl_values': [],
-            'updates_triggered': 0
-        }
+                'step_times': [],
+                'decision_times': [],
+                'update_duration': [],
+                'updates_triggered': 0
+            }
         
             # 初始化回合相关变量
             episode_total_reward = 0.0
@@ -552,7 +575,12 @@ class FastAdaptationTrainer:
             
             # 回合测试循环
             for step in range(max_steps):
-                # 选择动作
+                # 记录步骤开始时间
+                step_start_time = time.time()
+                
+                # 选择动作 - 记录决策开始时间
+                decision_start_time = time.time()
+                
                 state_tensor = torch.FloatTensor(state).unsqueeze(0).unsqueeze(1).to(device)
                 fc_action_out, bat_action_out, sc_action_out, _ = self.model(state_tensor, None)
                 
@@ -562,6 +590,11 @@ class FastAdaptationTrainer:
                 sc_action = torch.argmax(sc_action_out, dim=1).item()
                 
                 action_list = [fc_action, bat_action, sc_action]
+                
+                # 记录决策结束时间并计算决策耗时
+                decision_end_time = time.time()
+                decision_duration = decision_end_time - decision_start_time
+                episode_results['decision_times'].append(decision_duration)
                 
                 # 执行动作
                 next_state, reward, done, info = env.step(action_list)
@@ -598,6 +631,9 @@ class FastAdaptationTrainer:
                 if self._should_update() and not episode_update_triggered:
                     print(f"🚀 触发更新，KL散度: {total_kl:.4f}, 步数: {step}")
                     
+                    # 记录更新开始时间
+                    update_start_time = time.time()
+                    
                     # 备份参数
                     self._backup_params()
                     
@@ -610,6 +646,12 @@ class FastAdaptationTrainer:
                         self._restore_params()
                     else:
                         episode_update_count += 1
+                    
+                    # 记录更新结束时间
+                    update_end_time = time.time()
+                    update_duration = update_end_time - update_start_time
+                    episode_results['update_duration'].append(update_duration)
+                    print(f"⏱️  更新耗时: {update_duration:.4f}秒")
                     
                     episode_update_triggered = True
                 
@@ -624,6 +666,11 @@ class FastAdaptationTrainer:
                 episode_results['soc_bat'].append(next_state[5])
                 episode_results['soc_sc'].append(next_state[6])
                 episode_results['kl_values'].append(total_kl)
+                
+                # 记录步骤结束时间
+                step_end_time = time.time()
+                step_duration = step_end_time - step_start_time
+                episode_results['step_times'].append(step_duration)
                 
                 episode_total_reward += reward
                 state = next_state
@@ -650,21 +697,96 @@ class FastAdaptationTrainer:
             print(f"   回合平均奖励: {episode_avg_reward:.4f}")
             print(f"   回合触发更新次数: {episode_update_count}")
         
+        # 记录测试结束时间
+        test_end_time = time.time()
+        total_test_duration = test_end_time - test_start_time
+        
         # 计算所有回合的统计指标
         overall_avg_reward = total_reward / total_steps if total_steps > 0 else 0.0
         
-        # 生成最终结果（使用第一个回合的数据作为基础，添加总统计）
+        # 计算耗时统计指标
+        timing_stats = {
+            'total_test_duration': total_test_duration,  # 总测试耗时
+            'avg_episode_duration': 0.0,  # 平均每回合耗时
+            'avg_step_duration': 0.0,  # 平均每步耗时
+            'max_step_duration': 0.0,  # 最大单步耗时
+            'min_step_duration': float('inf'),  # 最小单步耗时
+            'avg_decision_duration': 0.0,  # 平均决策耗时
+            'max_decision_duration': 0.0,  # 最大决策耗时
+            'min_decision_duration': float('inf'),  # 最小决策耗时
+            'total_update_duration': 0.0,  # 总更新耗时
+            'avg_update_duration': 0.0,  # 平均更新耗时
+            'update_count': 0  # 更新总次数
+        }
+        
+        # 计算各回合的耗时统计
+        total_episode_durations = 0.0
+        all_step_times = []
+        all_decision_times = []
+        all_update_times = []
+        
+        for episode_result in all_episode_results:
+            # 计算回合耗时
+            if episode_result['step_times']:
+                episode_duration = sum(episode_result['step_times'])
+                total_episode_durations += episode_duration
+            
+            # 收集所有步耗时
+            all_step_times.extend(episode_result['step_times'])
+            
+            # 收集所有决策耗时
+            if 'decision_times' in episode_result:
+                all_decision_times.extend(episode_result['decision_times'])
+            
+            # 收集所有更新耗时
+            all_update_times.extend(episode_result['update_duration'])
+        
+        # 更新统计指标
+        if episodes > 0:
+            timing_stats['avg_episode_duration'] = total_episode_durations / episodes
+        
+        if all_step_times:
+            timing_stats['avg_step_duration'] = sum(all_step_times) / len(all_step_times)
+            timing_stats['max_step_duration'] = max(all_step_times)
+            timing_stats['min_step_duration'] = min(all_step_times)
+        
+        if all_decision_times:
+            timing_stats['avg_decision_duration'] = sum(all_decision_times) / len(all_decision_times)
+            timing_stats['max_decision_duration'] = max(all_decision_times)
+            timing_stats['min_decision_duration'] = min(all_decision_times)
+        
+        if all_update_times:
+            timing_stats['total_update_duration'] = sum(all_update_times)
+            timing_stats['avg_update_duration'] = sum(all_update_times) / len(all_update_times)
+            timing_stats['update_count'] = len(all_update_times)
+        
+        # 生成最终结果（使用第一个回合的数据作为基础，添加总统计和耗时统计）
         final_results = all_episode_results[0].copy()
         final_results['all_episodes'] = all_episode_results
         final_results['total_reward'] = total_reward
         final_results['total_steps'] = total_steps
         final_results['avg_reward'] = overall_avg_reward
         final_results['episodes'] = episodes
+        final_results['timing_stats'] = timing_stats
         
         print(f"\n✅ 场景 {scenario} 测试完成")
         print(f"   总奖励: {total_reward:.2f}")
         print(f"   平均奖励: {overall_avg_reward:.4f}")
         print(f"   总步数: {total_steps}")
+        
+        # 打印耗时统计
+        print(f"\n   ⏱️  耗时统计:")
+        print(f"   总测试耗时: {timing_stats['total_test_duration']:.4f}秒")
+        print(f"   平均每回合耗时: {timing_stats['avg_episode_duration']:.4f}秒")
+        print(f"   平均每步耗时: {timing_stats['avg_step_duration']:.6f}秒")
+        print(f"   最大单步耗时: {timing_stats['max_step_duration']:.4f}秒")
+        print(f"   最小单步耗时: {timing_stats['min_step_duration']:.6f}秒")
+        print(f"   平均决策耗时: {timing_stats['avg_decision_duration']:.6f}秒")
+        print(f"   最大决策耗时: {timing_stats['max_decision_duration']:.4f}秒")
+        print(f"   最小决策耗时: {timing_stats['min_decision_duration']:.6f}秒")
+        print(f"   总更新次数: {timing_stats['update_count']}")
+        print(f"   总更新耗时: {timing_stats['total_update_duration']:.4f}秒")
+        print(f"   平均每次更新耗时: {timing_stats['avg_update_duration']:.4f}秒")
         
         # 保存测试结果
         if save_results:
@@ -672,7 +794,8 @@ class FastAdaptationTrainer:
         
         return final_results
     
-    def plot_power_profiles(self, all_results, save_path, show_plot=False):
+    @classmethod
+    def plot_power_profiles(cls, all_results, save_path, show_plot=False):
         """
         绘制3种场景的功率分配结果，3行1列子图，参考超级环境plot_scenario_profiles的绘制方式
         
@@ -699,21 +822,24 @@ class FastAdaptationTrainer:
             'sc': '#8a7ab5'      # 超级电容
         }
         
+        # 基础功率和温度参考值
+        # 全局字体大小设置
+        GLOBAL_FONTSIZE = 16
+        
+        P_AIR_BASE = 2500
+        P_SURFACE_BASE = 1000
+        P_UNDERWATER_BASE = 3000
+        T_AIR = 0
+        T_SURFACE = 20
+        T_UNDERWATER = 5
+        
         # 创建3行1列子图，共享X轴
         fig, axes = plt.subplots(3, 1, figsize=(15, 12), sharex=True)
-        fig.suptitle('Fast Adaptation Power Distribution Results', fontsize=18, fontweight='bold', y=0.98)
-        
-        # 定义模态背景色映射
-        mode_colors = {
-            'air': ('lightblue', 0.1),
-            'surface': ('lightyellow', 0.1),
-            'underwater': ('lightgreen', 0.1),
-            'switch': ('orange', 0.2)
-        }
         
         # 绘制每个场景
         for idx, (scenario_type, scenario_label, scenario_color) in enumerate(scenarios):
-            ax = axes[idx]
+            ax1 = axes[idx]
+            ax2 = ax1.twinx()  # 共享X轴的温度轴
             
             # 获取当前场景的结果
             if scenario_type in all_results:
@@ -726,9 +852,10 @@ class FastAdaptationTrainer:
                 power_bat = scenario_result['power_bat']
                 power_sc = scenario_result['power_sc']
                 temperature = scenario_result['temperature']
+                soc_bat = scenario_result['soc_bat']
+                soc_sc = scenario_result['soc_sc']
                 
                 # 构建模态阶段信息（简化版，根据时间区间划分）
-                # 这里使用简化的模态划分，实际应该从环境中获取模态信息
                 modes = []
                 if scenario_type == 'cruise':
                     # 长航时巡航：空中(0-600)→切换(600-650)→水面(650-1150)→切换(1150-1200)→空中(1200-1800)
@@ -764,64 +891,91 @@ class FastAdaptationTrainer:
                         {'type': 'air', 'start': 1480, 'end': 1800, 'label': 'Air Flight'}
                     ]
                 
-                # 绘制模态背景色
+                # 绘制功率曲线
+                ax1.plot(times, load_demand, label='Power Demand', color=scenario_color, linewidth=1.2, linestyle='-')
+                ax1.plot(times, power_fc, label='Fuel Cell', color=power_colors['fc'], linewidth=1.2, linestyle='-')
+                ax1.plot(times, power_bat, label='Battery', color=power_colors['bat'], linewidth=1.2, linestyle='-')
+                ax1.plot(times, power_sc, label='Super Capacitor', color=power_colors['sc'], linewidth=1.2, linestyle='-')
+                
+                # 填充功率区域（与超级环境一致，使用场景颜色）
+                ax1.fill_between(times, 0, load_demand, color=scenario_color, alpha=0.1)
+                
+                # 添加基础功率参考线（与超级环境一致）
+                ax1.axhline(y=P_AIR_BASE, color='#1f77b4', linestyle='--', linewidth=1.5, alpha=0.6, label=f'Air Base Power ({P_AIR_BASE}W)')
+                ax1.axhline(y=P_SURFACE_BASE, color='#ff7f0e', linestyle='--', linewidth=1.5, alpha=0.6, label=f'Surface Base Power ({P_SURFACE_BASE}W)')
+                ax1.axhline(y=P_UNDERWATER_BASE, color='#2ca02c', linestyle='--', linewidth=1.5, alpha=0.6, label=f'Underwater Base Power ({P_UNDERWATER_BASE}W)')
+                
+                # 绘制温度曲线（与超级环境一致）
+                ax2.plot(times, temperature, color='darkred', linestyle='--', linewidth=1.2, label='Temperature')
+                
+                # 绘制SOC曲线（保持原有功能）
+                ax2.plot(times, [soc * 100 for soc in soc_bat], color='purple', linestyle='-.', linewidth=1.2, label='Battery SOC')
+                ax2.plot(times, [soc * 100 for soc in soc_sc], color='cyan', linestyle=':', linewidth=1.2, label='SuperCap SOC')
+                
+                # 添加温度参考线
+                ax2.axhline(y=T_AIR, color='blue', linestyle=':', linewidth=1.5, alpha=0.6, label=f'Air Temp ({T_AIR}℃)')
+                ax2.axhline(y=T_SURFACE, color='orange', linestyle=':', linewidth=1.5, alpha=0.6, label=f'Surface Temp ({T_SURFACE}℃)')
+                ax2.axhline(y=T_UNDERWATER, color='green', linestyle=':', linewidth=1.5, alpha=0.6, label=f'Underwater Temp ({T_UNDERWATER}℃)')
+                
+                # 标注模态阶段（先绘制背景色，再添加标签，确保在最上层）
                 for mode in modes:
-                    # 确定模态类型
-                    mode_type = mode['type']
-                    color, alpha = mode_colors['switch']  # 默认切换颜色
-                    if 'air' in mode_type and 'switch' not in mode_type:
-                        color, alpha = mode_colors['air']
-                    elif 'surface' in mode_type and 'switch' not in mode_type:
-                        color, alpha = mode_colors['surface']
-                    elif 'underwater' in mode_type and 'switch' not in mode_type:
-                        color, alpha = mode_colors['underwater']
-                    
-                    # 绘制背景色
-                    ax.axvspan(mode['start'], mode['end'], alpha=alpha, color=color)
-                    
-                    # 添加模态标签（仅标注主要模态）
-                    if 'switch' not in mode_type:
+                    # 绘制模态背景色
+                    if 'air' in mode['type'] and 'switch' not in mode['type']:
+                        ax1.axvspan(mode['start'], mode['end'], alpha=0.1, color='lightblue')
+                    elif 'surface' in mode['type'] and 'switch' not in mode['type']:
+                        ax1.axvspan(mode['start'], mode['end'], alpha=0.1, color='lightyellow')
+                    elif 'underwater' in mode['type'] and 'switch' not in mode['type']:
+                        ax1.axvspan(mode['start'], mode['end'], alpha=0.1, color='lightgreen')
+                    elif 'switch' in mode['type']:
+                        ax1.axvspan(mode['start'], mode['end'], alpha=0.2, color='orange')
+                
+                # 添加模态标签（仅标注主要模态，与超级环境一致）
+                for mode in modes:
+                    if 'switch' not in mode['type']:
                         mid_time = (mode['start'] + mode['end']) / 2
-                        ax.text(mid_time, ax.get_ylim()[1]*0.7, mode['label'], 
+                        ax1.text(mid_time, ax1.get_ylim()[1]*0.7, mode['label'], 
                                 ha='center', va='center', fontsize=9, fontweight='bold',
                                 bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
                 
-                # 绘制功率曲线
-                ax.plot(times, load_demand, label='Load Demand', color=power_colors['load'], linewidth=1.2, linestyle='--')
-                ax.plot(times, power_fc, label='Fuel Cell', color=power_colors['fc'], linewidth=1.2)
-                ax.plot(times, power_bat, label='Battery', color=power_colors['bat'], linewidth=1.2)
-                ax.plot(times, power_sc, label='Super Capacitor', color=power_colors['sc'], linewidth=1.2)
-                
-                # 填充功率区域
-                ax.fill_between(times, 0, load_demand, color=power_colors['load'], alpha=0.1)
-                
                 # 设置子图属性
-                ax.set_title(scenario_label, fontsize=14, fontweight='bold', pad=10)
-                ax.set_ylabel('Power (W)', fontsize=12, fontweight='bold')
-                ax.grid(True, linestyle='--', alpha=0.7)
-                ax.set_ylim(0, max(max(load_demand), max(power_fc), max(power_bat), max(power_sc)) * 1.1)
-                ax.tick_params(axis='y', labelsize=10)
+                ax1.set_title(scenario_label, fontsize=14, fontweight='bold', pad=10)  # 与超级环境一致
+                ax1.set_ylabel('Power (W)', fontsize=GLOBAL_FONTSIZE, fontweight='bold')
+                ax1.grid(True, linestyle='--', alpha=0.7)
+                ax1.set_ylim(0, max(max(load_demand), max(power_fc), max(power_bat), max(power_sc)) * 1.1)
+                ax1.tick_params(axis='y', labelsize=GLOBAL_FONTSIZE)
+                
+                ax2.set_ylabel('Temperature (℃) / SOC (%)', fontsize=GLOBAL_FONTSIZE, fontweight='bold', color='darkred')
+                ax2.set_ylim(-5, 105)
+                ax2.tick_params(axis='y', labelsize=GLOBAL_FONTSIZE, colors='darkred')
                 
                 # 美化边框
-                ax.spines['top'].set_visible(False)
+                ax1.spines['top'].set_visible(False)
+                ax2.spines['top'].set_visible(False)
                 
-                # 只在第一个子图添加图例
-                if idx == 0:
-                    ax.legend(loc='upper right', fontsize=10, ncol=2)
+                # 保存图例信息，但不在单个ax上绘制
+                if idx == 0:  # 只在第一个子图收集图例信息
+                    lines1, labels1 = ax1.get_legend_handles_labels()
+                    lines2, labels2 = ax2.get_legend_handles_labels()
+                    fig_legend_handles = lines1 + lines2
+                    fig_legend_labels = labels1 + labels2
             else:
-                ax.set_title(scenario_label, fontsize=14, fontweight='bold', pad=10)
-                ax.set_ylabel('Power (W)', fontsize=12, fontweight='bold')
-                ax.grid(True, linestyle='--', alpha=0.7)
-                ax.spines['top'].set_visible(False)
+                ax1.set_ylabel('Power (W)', fontsize=GLOBAL_FONTSIZE, fontweight='bold')
+                ax1.grid(True, linestyle='--', alpha=0.7)
+                ax1.spines['top'].set_visible(False)
+                ax2.spines['top'].set_visible(False)
         
-        # 设置共享X轴标签
-        axes[-1].set_xlabel('Time (s)', fontsize=14, fontweight='bold')
+        # 设置X轴
+        axes[-1].set_xlabel('Time (s)', fontsize=GLOBAL_FONTSIZE, fontweight='bold')
         axes[-1].set_xlim(0, 1800)  # 设置为1800s
         axes[-1].set_xticks(np.arange(0, 1801, 200))  # 每200s一个刻度
-        axes[-1].tick_params(axis='x', labelsize=10)
+        axes[-1].tick_params(axis='x', labelsize=GLOBAL_FONTSIZE)
         
-        # 调整布局
-        plt.tight_layout(rect=[0, 0.03, 1, 0.97])
+        # 创建figure级别的共享图例（位于所有Axes之上，与超级环境一致）
+        fig.legend(fig_legend_handles, fig_legend_labels, loc='upper center', fontsize=9, framealpha=0.9, 
+                  bbox_to_anchor=(0.5, 0.92), ncol=6)  # 顶部居中，6列布局，与超级环境一致
+        
+        # 调整布局（与超级环境一致）
+        plt.tight_layout(rect=[0, 0, 1, 0.88])  # 调整顶部边距以容纳图例
         
         # 保存图片
         plt.savefig(save_path, dpi=1200, bbox_inches='tight')
@@ -937,8 +1091,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description='快学习/快测试脚本')
     
     # 核心参数
-    parser.add_argument('--model-path', type=str, required=True,
-                        help='预训练模型路径')
+    parser.add_argument('--model-path', type=str, required=False,
+                        help='预训练模型路径（--plot-only模式下可选）')
     parser.add_argument('--hyperparams-path', type=str, default=None,
                         help='快学习超参数路径')
     
@@ -947,12 +1101,16 @@ def parse_args():
                         help='测试场景名称（默认：所有场景）')
     parser.add_argument('--episodes', type=int, default=1,
                         help='测试回合数（默认：1）')
-    parser.add_argument('--max-steps', type=int, default=1000,
+    parser.add_argument('--max-steps', type=int, default=1800,
                         help='每个场景的最大测试步数')
     parser.add_argument('--save-results', action='store_true',
                         help='是否保存测试结果')
     parser.add_argument('--show-plot', action='store_true',
                         help='是否显示测试结果图（默认：仅保存不显示）')
+    
+    # 快速绘图参数
+    parser.add_argument('--plot-only', type=str, default=None,
+                        help='路径到之前保存的结果，跳过测试直接绘图')
     
     # 自定义超参数
     parser.add_argument('--lr', type=float, default=None,
@@ -969,6 +1127,45 @@ def main():
     主函数
     """
     args = parse_args()
+    
+    # --plot-only模式：直接从保存的结果绘图
+    if args.plot_only:
+        print(f"📊 进入--plot-only模式，从{args.plot_only}加载结果")
+        
+        # 加载保存的结果
+        if os.path.exists(args.plot_only):
+            with open(args.plot_only, 'r', encoding='utf-8') as f:
+                results = json.load(f)
+            
+            # 确定绘图路径
+            plot_path = os.path.join(os.path.dirname(args.plot_only), "power_distribution_fast.svg")
+            
+            # 创建一个最小化的trainer实例，仅用于调用plot_power_profiles
+            if args.model_path:
+                trainer = FastAdaptationTrainer(
+                    model_path=args.model_path,
+                    hyperparams_path=args.hyperparams_path,
+                    custom_hyperparams={}
+                )
+            else:
+                # 如果没有提供模型路径，可以直接使用静态方法
+                trainer = type('DummyTrainer', (), {
+                    'timestamp': datetime.now().strftime("%m%d_%H%M%S"),
+                    'plot_power_profiles': FastAdaptationTrainer.plot_power_profiles
+                })()
+            
+            # 调用绘图函数
+            trainer.plot_power_profiles(results, plot_path, show_plot=args.show_plot)
+            print(f"\n=== 快速绘图完成 ===")
+            return
+        else:
+            print(f"❌ 错误：结果文件{args.plot_only}不存在")
+            sys.exit(1)
+    
+    # 正常测试模式
+    if not args.model_path:
+        print(f"❌ 错误：正常测试模式下必须提供--model-path参数")
+        sys.exit(1)
     
     # 构建自定义超参数
     custom_hyperparams = {}
@@ -988,28 +1185,37 @@ def main():
     
     # 测试场景
     if args.scenario:
-        # 测试单个场景
-        results = trainer.test_single_scenario(
-            scenario=args.scenario,
-            max_steps=args.max_steps,
-            save_results=args.save_results,
-            episodes=args.episodes
-        )
-        
-        # 如果保存结果，绘制单个场景的功率分配图像
-        if args.save_results:
-            # 绘制单个场景的功率分配图像
-            results_dir = os.path.join(
-                os.path.abspath(os.path.join(os.path.dirname(__file__), '../../nets/Chap5/fast_adaptation')),
-                trainer.timestamp
+        if args.scenario == "classical":
+            # 测试经典场景（cruise, recon, rescue）
+            trainer.test_all_scenarios(
+                max_steps=args.max_steps,
+                save_results=args.save_results,
+                show_plot=args.show_plot,
+                episodes=args.episodes
             )
-            plot_path = os.path.join(results_dir, f"power_distribution_{args.scenario}.svg")
+        else:
+            # 测试单个场景
+            results = trainer.test_single_scenario(
+                scenario=args.scenario,
+                max_steps=args.max_steps,
+                save_results=args.save_results,
+                episodes=args.episodes
+            )
             
-            # 创建单个场景的结果字典
-            single_result = {args.scenario: results}
-            
-            # 调用绘图函数
-            trainer.plot_power_profiles(single_result, plot_path, show_plot=args.show_plot)
+            # 如果保存结果，绘制单个场景的功率分配图像
+            if args.save_results:
+                # 绘制单个场景的功率分配图像
+                results_dir = os.path.join(
+                    os.path.abspath(os.path.join(os.path.dirname(__file__), '../../nets/Chap5/fast_adaptation')),
+                    trainer.timestamp
+                )
+                plot_path = os.path.join(results_dir, f"power_distribution_{args.scenario}.svg")
+                
+                # 创建单个场景的结果字典
+                single_result = {args.scenario: results}
+                
+                # 调用绘图函数
+                trainer.plot_power_profiles(single_result, plot_path, show_plot=args.show_plot)
     else:
         # 测试所有场景
         trainer.test_all_scenarios(
