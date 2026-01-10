@@ -63,7 +63,7 @@ class IndependentDQN(object):
             mode='max',
             factor=lr_factor,
             patience=lr_patience,
-            min_lr=1e-7
+            min_lr=1e-8
         )
 
     def load_net(self, path):

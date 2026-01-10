@@ -164,20 +164,37 @@ def load_params_from_joint_net(joint_net_dir, policy):
 class SlowTrainer:
     """
     慢训练算法类，专注于在多种模态上进行扎实的慢训练
+    使用传统DQN训练逻辑：双网络结构、经验回放、Bellman方程
     """
-    def __init__(self, policy, lr=5e-4, gamma=0.99, hidden_dim=256, num_workers=9):
+    def __init__(self, policy, lr=5e-4, gamma=0.99, hidden_dim=256, num_workers=9, epsilon=0.1, pool_size=100):
         self.policy = policy
+        # 创建目标网络
+        self.target_policy = MetaRLPolicy(hidden_dim=hidden_dim).to(device)
+        self.target_policy.load_state_dict(self.policy.state_dict())
+        self.target_policy.eval()  # 目标网络设置为评估模式
+        
         # 使用Adam优化器，带有权重衰减
         self.optimizer = optim.Adam(self.policy.parameters(), lr=lr, weight_decay=1e-5)
         # 添加学习率调度器，当奖励连续100轮不提升时，学习率乘以0.5
         self.lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            self.optimizer, mode='max', patience=500, factor=0.5
+            self.optimizer, mode='max', patience=100, factor=0.5
         )
         # 跟踪当前学习率，用于日志提示
         self.current_lr = lr
         self.gamma = gamma
-        # 使用Huber损失，对异常值更鲁棒
-        self.loss_func = nn.SmoothL1Loss()
+        # 探索率参数
+        self.epsilon = epsilon
+        
+        # DQN训练参数
+        self.target_replace_iter = 100  # 目标网络更新频率
+        self.learn_step_counter = 0  # 学习步数计数器
+        self.batch_size = 32  # 批次大小
+        self.pool_size = pool_size  # 池大小参数，用于计算经验池容量
+        
+        # 经验回放池 - 先设置一个默认值，后续会根据环境的step_length动态调整
+        self.memory = []
+        self.memory_capacity = 10000  # 默认经验池容量
+        self.max_step_length = 0  # 记录所有场景中的最大step_length
         
         # 9种场景的任务集合
         self.scenarios = [
@@ -193,16 +210,25 @@ class SlowTrainer:
     
     def generate_experiences(self, scenario, max_steps=1000):
         """
-        在单个场景上生成经验数据（状态、奖励），不进行梯度更新
+        在单个场景上生成完整的经验数据（状态、动作、奖励、下一状态），用于后续训练
         """
         # 创建环境
         env = EnvUltra(scenario_type=scenario)
         state = env.reset()
         
+        # 更新最大step_length，用于计算经验池容量
+        with self.model_lock:
+            if hasattr(env, 'step_length') and env.step_length > self.max_step_length:
+                self.max_step_length = env.step_length
+                # 动态计算经验池容量：与JointNet保持一致的计算方式
+                new_capacity = max(self.max_step_length * self.pool_size, self.batch_size * 2)
+                if new_capacity != self.memory_capacity:
+                    self.memory_capacity = new_capacity
+        
         total_reward = 0.0
         steps = 0
         
-        # 收集经验数据（仅状态和奖励）
+        # 收集完整的经验数据
         experiences = []
         
         while steps < max_steps:
@@ -213,10 +239,24 @@ class SlowTrainer:
             state_tensor = torch.FloatTensor(state).unsqueeze(0).unsqueeze(1).to(device)
             fc_action_out, bat_action_out, sc_action_out, _ = self.policy(state_tensor, hidden)
             
-            # 贪婪选择动作
-            fc_action = torch.argmax(fc_action_out, dim=1).item()
-            bat_action = torch.argmax(bat_action_out, dim=1).item()
-            sc_action = torch.argmax(sc_action_out, dim=1).item()
+            # 使用epsilon-greedy策略选择动作
+            # 燃料电池智能体
+            if np.random.random() < self.epsilon:
+                fc_action = np.random.randint(0, fc_action_out.shape[1])
+            else:
+                fc_action = torch.argmax(fc_action_out, dim=1).item()
+            
+            # 电池智能体
+            if np.random.random() < self.epsilon:
+                bat_action = np.random.randint(0, bat_action_out.shape[1])
+            else:
+                bat_action = torch.argmax(bat_action_out, dim=1).item()
+            
+            # 超级电容智能体
+            if np.random.random() < self.epsilon:
+                sc_action = np.random.randint(0, sc_action_out.shape[1])
+            else:
+                sc_action = torch.argmax(sc_action_out, dim=1).item()
             
             action_list = [fc_action, bat_action, sc_action]
             
@@ -226,18 +266,21 @@ class SlowTrainer:
             # 计算目标值，添加燃料电池跟踪负载的奖励项
             P_load = info['P_load']
             P_fc = info['P_fc']
-            tracking_reward = -abs(P_load - P_fc) * 0.01  # 鼓励FC接近负载
+            # tracking_reward = -abs(P_load - P_fc) * 0.01  # 鼓励FC接近负载
             
             # 组合奖励
-            adjusted_reward = reward + tracking_reward
+            # adjusted_reward = reward + tracking_reward
             
-            # 保存经验数据（仅原始数据，不保存计算图相关内容）
+            # 保存完整的经验数据
             experiences.append({
                 'state': state,
-                'reward': adjusted_reward
+                'action': action_list,
+                'reward': reward,
+                'next_state': next_state,
+                'done': done
             })
             
-            total_reward += adjusted_reward
+            total_reward += reward
             state = next_state
             steps += 1
             
@@ -248,40 +291,98 @@ class SlowTrainer:
     
     def update_from_experiences(self, all_experiences):
         """
-        从收集的所有经验数据中更新模型：在主线程中重新计算动作并构建计算图
+        从收集的所有经验数据中更新模型：使用传统DQN训练逻辑
         """
         if not all_experiences:
             return
         
-        # 收集所有损失
-        all_losses = []
-        
-        # 在主线程中重新计算所有动作并构建计算图
+        # 1. 将生成的经验数据存储到经验回放池中
         for experiences in all_experiences:
             for exp in experiences:
-                # 重新计算动作，构建计算图
-                state = exp['state']
-                state_tensor = torch.FloatTensor(state).unsqueeze(0).unsqueeze(1).to(device)
-                hidden = None  # 重新初始化隐藏状态
-                fc_action_out, bat_action_out, sc_action_out, _ = self.policy(state_tensor, hidden)
-                
-                # 创建目标张量
-                target = torch.tensor(exp['reward'], dtype=torch.float32).to(device)
-                
-                # 计算损失，增加FC动作的权重，鼓励FC跟踪负载
-                loss_fc = self.loss_func(fc_action_out, target.expand_as(fc_action_out)) * 1.5
-                loss_bat = self.loss_func(bat_action_out, target.expand_as(bat_action_out))
-                loss_sc = self.loss_func(sc_action_out, target.expand_as(sc_action_out))
-                
-                total_loss = loss_fc + loss_bat + loss_sc
-                all_losses.append(total_loss)
+                # 存储经验到回放池
+                self.memory.append(exp)
+                # 如果回放池超过容量，删除最旧的经验
+                if len(self.memory) > self.memory_capacity:
+                    self.memory.pop(0)
         
-        # 计算平均损失并更新策略
-        if all_losses:
-            avg_loss = torch.mean(torch.stack(all_losses))
-            self.optimizer.zero_grad()
-            avg_loss.backward()
-            self.optimizer.step()
+        # 2. 当经验池足够大时，进行训练
+        if len(self.memory) < self.batch_size:
+            return
+        
+        # 3. 随机采样一批经验
+        sample_indices = np.random.choice(len(self.memory), self.batch_size, replace=False)
+        batch_experiences = [self.memory[i] for i in sample_indices]
+        
+        # 4. 准备训练数据
+        states = []
+        actions = []
+        rewards = []
+        next_states = []
+        dones = []
+        
+        for exp in batch_experiences:
+            states.append(exp['state'])
+            actions.append(exp['action'])
+            rewards.append(exp['reward'])
+            next_states.append(exp['next_state'])
+            dones.append(exp['done'])
+        
+        # 转换为张量
+        states_tensor = torch.FloatTensor(np.array(states)).unsqueeze(1).to(device)
+        next_states_tensor = torch.FloatTensor(np.array(next_states)).unsqueeze(1).to(device)
+        rewards_tensor = torch.FloatTensor(np.array(rewards)).to(device)
+        dones_tensor = torch.BoolTensor(np.array(dones)).to(device)
+        
+        # 5. 使用当前网络计算Q值（q_eval）
+        fc_q_eval, bat_q_eval, sc_q_eval, _ = self.policy(states_tensor, None)
+        
+        # 6. 使用目标网络计算下一状态的最大Q值（q_next）
+        with torch.no_grad():
+            fc_q_next, bat_q_next, sc_q_next, _ = self.target_policy(next_states_tensor, None)
+            fc_q_next_max = fc_q_next.max(dim=1)[0]
+            bat_q_next_max = bat_q_next.max(dim=1)[0]
+            sc_q_next_max = sc_q_next.max(dim=1)[0]
+        
+        # 7. 计算目标Q值（q_target = r + gamma * q_next）
+        fc_q_target = rewards_tensor + self.gamma * fc_q_next_max * (~dones_tensor)
+        bat_q_target = rewards_tensor + self.gamma * bat_q_next_max * (~dones_tensor)
+        sc_q_target = rewards_tensor + self.gamma * sc_q_next_max * (~dones_tensor)
+        
+        # 8. 提取实际动作对应的Q值
+        actions = np.array(actions)
+        fc_actions = actions[:, 0].tolist()
+        bat_actions = actions[:, 1].tolist()
+        sc_actions = actions[:, 2].tolist()
+        
+        # 转换为张量
+        fc_actions_tensor = torch.LongTensor(fc_actions).unsqueeze(1).to(device)
+        bat_actions_tensor = torch.LongTensor(bat_actions).unsqueeze(1).to(device)
+        sc_actions_tensor = torch.LongTensor(sc_actions).unsqueeze(1).to(device)
+        
+        # 提取对应动作的Q值
+        fc_q_eval_selected = fc_q_eval.gather(1, fc_actions_tensor).squeeze(1)
+        bat_q_eval_selected = bat_q_eval.gather(1, bat_actions_tensor).squeeze(1)
+        sc_q_eval_selected = sc_q_eval.gather(1, sc_actions_tensor).squeeze(1)
+        
+        # 9. 计算损失
+        loss_func = nn.MSELoss()
+        fc_loss = loss_func(fc_q_eval_selected, fc_q_target)
+        bat_loss = loss_func(bat_q_eval_selected, bat_q_target)
+        sc_loss = loss_func(sc_q_eval_selected, sc_q_target)
+        
+        # 总损失（三个智能体的损失之和）
+        total_loss = fc_loss + bat_loss + sc_loss
+        
+        # 10. 反向传播更新当前网络
+        self.optimizer.zero_grad()
+        total_loss.backward()
+        self.optimizer.step()
+        
+        # 11. 定期更新目标网络
+        self.learn_step_counter += 1
+        if self.learn_step_counter % self.target_replace_iter == 0:
+            self.target_policy.load_state_dict(self.policy.state_dict())
+            print(f"📌 目标网络已更新（步数: {self.learn_step_counter}）")
     
     def train(self, num_epochs=1000, eval_interval=100, save_interval=100, result_saver=None, output_dir=None):
         """
@@ -291,7 +392,8 @@ class SlowTrainer:
         best_avg_reward = -float('inf')
         
         # 使用tqdm添加epoch进度条
-        for epoch in tqdm(range(num_epochs), desc="慢训练进度", unit="epoch"):
+        pbar = tqdm(range(num_epochs), desc="慢训练进度", unit="epoch")
+        for epoch in pbar:
             epoch_rewards = []
             all_experiences = []
             
@@ -321,6 +423,9 @@ class SlowTrainer:
             
             # 检查学习率是否变化并输出日志
             new_lr = self.optimizer.param_groups[0]['lr']
+            
+            # 在tqdm进度条上显示当前的奖励值和学习率
+            pbar.set_postfix({"当前奖励": f"{avg_reward:.4f}", "当前学习率": f"{new_lr:.6f}"})
             if new_lr != self.current_lr:
                 print(f"📉 学习率已更新: {self.current_lr:.6f} → {new_lr:.6f}")
                 self.current_lr = new_lr
@@ -352,10 +457,12 @@ def main():
     parser.add_argument('--lr', type=float, default=5e-4, help='学习率')
     parser.add_argument('--hidden-dim', type=int, default=512, help='隐藏层维度')
     parser.add_argument('--gamma', type=float, default=0.95, help='折扣因子')
+    parser.add_argument('--epsilon', type=float, default=0.1, help='贪心率/探索率')
     parser.add_argument('--output-dir', type=str, default='', help='输出目录')
     parser.add_argument('--eval-interval', type=int, default=50, help='评估间隔')
     parser.add_argument('--save-interval', type=int, default=100, help='模型保存间隔')
     parser.add_argument('--num-workers', type=int, default=9, help='训练线程数')
+    parser.add_argument('--pool-size', type=int, default=100, help='池大小（用于计算经验池容量）')
     parser.add_argument('--seed', type=int, default=42, help='随机种子，用于确保训练可复现')
     parser.add_argument('--load-model-path', type=str, default='', help='要加载的预训练慢学习模型路径，用于继续训练')
     parser.add_argument('--from-joint-net', type=str, default='', help='要加载的JointNet模型目录，用于从JointNet继续训练')
@@ -410,11 +517,12 @@ def main():
             raise FileNotFoundError(f"JointNet模型目录不存在: {args.from_joint_net}")
     
     # 初始化慢训练器
-    trainer = SlowTrainer(policy, lr=args.lr, gamma=args.gamma, hidden_dim=args.hidden_dim, num_workers=args.num_workers)
+    trainer = SlowTrainer(policy, lr=args.lr, gamma=args.gamma, hidden_dim=args.hidden_dim, num_workers=args.num_workers, epsilon=args.epsilon, pool_size=args.pool_size)
     
     print("=== 开始慢训练 ===")
     print(f"训练场景: {trainer.scenarios}")
-    print(f"学习率: {args.lr}, 隐藏层维度: {args.hidden_dim}, 训练轮次: {args.num_epochs}")
+    print(f"学习率: {args.lr}, 折扣因子: {args.gamma}, 贪心率: {args.epsilon}, 隐藏层维度: {args.hidden_dim}, 训练轮次: {args.num_epochs}")
+    print(f"训练线程数: {args.num_workers}, 经验池大小参数: {args.pool_size}")
     
     # 执行慢训练
     start_time = time.time()
@@ -470,6 +578,7 @@ def main():
         "lr": args.lr,
         "hidden_dim": args.hidden_dim,
         "gamma": args.gamma,
+        "epsilon": args.epsilon,
         "eval_interval": args.eval_interval,
         "save_interval": args.save_interval,
         "best_avg_reward": best_avg_reward,

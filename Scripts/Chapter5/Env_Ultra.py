@@ -48,8 +48,8 @@ class EnvUltra(gym.Env):
     # 经典环境场景类型（兼容旧智能体）
     CLASSIC_SCENARIO_TYPES = ['default']
     # 超级环境场景类型
-    ADVANCED_SCENARIO_TYPES = ['cruise', 'recon', 'rescue',
-                              'air', 'surface', 'underwater',
+    ADVANCED_SCENARIO_TYPES = ['cruise', 'recon', 'rescue',# 3种典型环境
+                              'air', 'surface', 'underwater',# 9中元环境
                               'air_to_surface', 'surface_to_air',
                               'air_to_underwater', 'underwater_to_air',
                               'surface_to_underwater', 'underwater_to_surface']

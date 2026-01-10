@@ -706,16 +706,16 @@ class FastAdaptationTrainer:
         
         # 计算耗时统计指标
         timing_stats = {
-            'total_test_duration': total_test_duration,  # 总测试耗时
-            'avg_episode_duration': 0.0,  # 平均每回合耗时
-            'avg_step_duration': 0.0,  # 平均每步耗时
-            'max_step_duration': 0.0,  # 最大单步耗时
-            'min_step_duration': float('inf'),  # 最小单步耗时
-            'avg_decision_duration': 0.0,  # 平均决策耗时
-            'max_decision_duration': 0.0,  # 最大决策耗时
-            'min_decision_duration': float('inf'),  # 最小决策耗时
-            'total_update_duration': 0.0,  # 总更新耗时
-            'avg_update_duration': 0.0,  # 平均更新耗时
+            'total_test_duration': total_test_duration,  # 总测试耗时（秒）
+            'avg_episode_duration': 0.0,  # 平均每回合耗时（秒）
+            'avg_step_duration_ms': 0.0,  # 平均每步耗时（毫秒）
+            'max_step_duration_ms': 0.0,  # 最大单步耗时（毫秒）
+            'min_step_duration_ms': float('inf'),  # 最小单步耗时（毫秒）
+            'avg_decision_duration_ms': 0.0,  # 平均决策耗时（毫秒）
+            'max_decision_duration_ms': 0.0,  # 最大决策耗时（毫秒）
+            'min_decision_duration_ms': float('inf'),  # 最小决策耗时（毫秒）
+            'total_update_duration_ms': 0.0,  # 总更新耗时（毫秒）
+            'avg_update_duration_ms': 0.0,  # 平均更新耗时（毫秒）
             'update_count': 0  # 更新总次数
         }
         
@@ -746,18 +746,22 @@ class FastAdaptationTrainer:
             timing_stats['avg_episode_duration'] = total_episode_durations / episodes
         
         if all_step_times:
-            timing_stats['avg_step_duration'] = sum(all_step_times) / len(all_step_times)
-            timing_stats['max_step_duration'] = max(all_step_times)
-            timing_stats['min_step_duration'] = min(all_step_times)
+            avg_step_s = sum(all_step_times) / len(all_step_times)
+            timing_stats['avg_step_duration_ms'] = avg_step_s * 1000
+            timing_stats['max_step_duration_ms'] = max(all_step_times) * 1000
+            timing_stats['min_step_duration_ms'] = min(all_step_times) * 1000
         
         if all_decision_times:
-            timing_stats['avg_decision_duration'] = sum(all_decision_times) / len(all_decision_times)
-            timing_stats['max_decision_duration'] = max(all_decision_times)
-            timing_stats['min_decision_duration'] = min(all_decision_times)
+            avg_decision_s = sum(all_decision_times) / len(all_decision_times)
+            timing_stats['avg_decision_duration_ms'] = avg_decision_s * 1000
+            timing_stats['max_decision_duration_ms'] = max(all_decision_times) * 1000
+            timing_stats['min_decision_duration_ms'] = min(all_decision_times) * 1000
         
         if all_update_times:
-            timing_stats['total_update_duration'] = sum(all_update_times)
-            timing_stats['avg_update_duration'] = sum(all_update_times) / len(all_update_times)
+            total_update_s = sum(all_update_times)
+            avg_update_s = total_update_s / len(all_update_times)
+            timing_stats['total_update_duration_ms'] = total_update_s * 1000
+            timing_stats['avg_update_duration_ms'] = avg_update_s * 1000
             timing_stats['update_count'] = len(all_update_times)
         
         # 生成最终结果（使用第一个回合的数据作为基础，添加总统计和耗时统计）
@@ -776,17 +780,13 @@ class FastAdaptationTrainer:
         
         # 打印耗时统计
         print(f"\n   ⏱️  耗时统计:")
-        print(f"   总测试耗时: {timing_stats['total_test_duration']:.4f}秒")
         print(f"   平均每回合耗时: {timing_stats['avg_episode_duration']:.4f}秒")
-        print(f"   平均每步耗时: {timing_stats['avg_step_duration']:.6f}秒")
-        print(f"   最大单步耗时: {timing_stats['max_step_duration']:.4f}秒")
-        print(f"   最小单步耗时: {timing_stats['min_step_duration']:.6f}秒")
-        print(f"   平均决策耗时: {timing_stats['avg_decision_duration']:.6f}秒")
-        print(f"   最大决策耗时: {timing_stats['max_decision_duration']:.4f}秒")
-        print(f"   最小决策耗时: {timing_stats['min_decision_duration']:.6f}秒")
+        print(f"   平均每步耗时: {timing_stats['avg_step_duration_ms']:.4f}毫秒")
+        print(f"   平均决策耗时: {timing_stats['avg_decision_duration_ms']:.4f}毫秒")
+        print(f"   最小决策耗时: {timing_stats['min_decision_duration_ms']:.4f}毫秒")
+        print(f"   最大决策耗时: {timing_stats['max_decision_duration_ms']:.4f}毫秒")
+        print(f"   平均更新耗时: {timing_stats['avg_update_duration_ms']:.4f}毫秒")
         print(f"   总更新次数: {timing_stats['update_count']}")
-        print(f"   总更新耗时: {timing_stats['total_update_duration']:.4f}秒")
-        print(f"   平均每次更新耗时: {timing_stats['avg_update_duration']:.4f}秒")
         
         # 保存测试结果
         if save_results:
@@ -971,8 +971,9 @@ class FastAdaptationTrainer:
         axes[-1].tick_params(axis='x', labelsize=GLOBAL_FONTSIZE)
         
         # 创建figure级别的共享图例（位于所有Axes之上，与超级环境一致）
-        fig.legend(fig_legend_handles, fig_legend_labels, loc='upper center', fontsize=9, framealpha=0.9, 
-                  bbox_to_anchor=(0.5, 0.92), ncol=6)  # 顶部居中，6列布局，与超级环境一致
+        if 'fig_legend_handles' in locals() and 'fig_legend_labels' in locals():
+            fig.legend(fig_legend_handles, fig_legend_labels, loc='upper center', fontsize=9, framealpha=0.9, 
+                      bbox_to_anchor=(0.5, 0.92), ncol=6)  # 顶部居中，6列布局，与超级环境一致
         
         # 调整布局（与超级环境一致）
         plt.tight_layout(rect=[0, 0, 1, 0.88])  # 调整顶部边距以容纳图例

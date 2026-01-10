@@ -48,12 +48,14 @@ nohup python Scripts/Chapter4/train_Joint.py \
 
 nohup python Scripts/Chapter4/train_Joint.py \
 --resume-training \
+--episode 10000 \
+--pool-size 100 \
 --pretrain-date 1223 \
---pretrain-train-id 0 \
+--pretrain-train-id 3 \
 --epsilon 0.9 \
---lr 1e-5 \
+--lr 1e-6 \
 --pretrain-model-prefix "Joint_Model" \
---episode 2000 > logs/1223_3.log 2>&1 &
+> logs/0109/0109_Joint_2.log 2>&1 &
 
 """
 
