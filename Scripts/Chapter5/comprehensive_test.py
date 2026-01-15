@@ -23,7 +23,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
 from Scripts.Chapter5.Env_Ultra import EnvUltra
 from Scripts.Chapter5.baseline_strategies import BaselineStrategies
 
-def test_baseline_strategy(strategy_name, env, episodes=1):
+def test_baseline_strategy(strategy_name, env, episodes=1, output_dir=None, strategy_name_for_save=None):
     """
     测试基准策略
     
@@ -31,12 +31,16 @@ def test_baseline_strategy(strategy_name, env, episodes=1):
         strategy_name: 策略名称 ('rule_based')
         env: 环境实例
         episodes: 测试回合数
+        output_dir: 输出目录
+        strategy_name_for_save: 策略名称，用于保存结果
     
     Returns:
         avg_reward: 平均奖励
         avg_steps: 平均步数
         power_matching_percent: 功率匹配度百分比
         avg_decision_time_ms: 平均决策耗时（毫秒）
+        total_hydrogen_consumption: 总等效氢耗（克）
+        battery_soc_range: 锂电池SOC范围 [min, max]
     """
     import time
     strategies = BaselineStrategies(env)
@@ -45,6 +49,19 @@ def test_baseline_strategy(strategy_name, env, episodes=1):
     total_unmatched_power = 0.0
     total_demand_power = 0.0
     total_decision_time = 0.0
+    total_hydrogen_consumption = 0.0
+    
+    # 用于保存SOC范围
+    min_soc_b = float('inf')
+    max_soc_b = float('-inf')
+    
+    # 用于保存功率数据
+    all_power_data = {
+        'load_demand': [],
+        'power_fc': [],
+        'power_bat': [],
+        'power_sc': []
+    }
     
     for episode in range(episodes):
         state = env.reset()
@@ -54,6 +71,9 @@ def test_baseline_strategy(strategy_name, env, episodes=1):
         episode_unmatched_power = 0.0
         episode_demand_power = 0.0
         episode_decision_time = 0.0
+        episode_hydrogen_consumption = 0.0
+        episode_min_soc_b = float('inf')
+        episode_max_soc_b = float('-inf')
         
         while not done:
             # 记录决策开始时间
@@ -76,6 +96,23 @@ def test_baseline_strategy(strategy_name, env, episodes=1):
             P_bat = info['P_bat']
             P_sc = info['P_sc']
             
+            # 保存功率数据
+            all_power_data['load_demand'].append(float(P_load))
+            all_power_data['power_fc'].append(float(P_fc))
+            all_power_data['power_bat'].append(float(P_bat))
+            all_power_data['power_sc'].append(float(P_sc))
+            
+            # 计算等效氢耗（使用get方法，避免KeyError）
+            # 注意：Env_Ultra的step函数返回的是C_fc_g和C_bat_g，而不是C_fc和C_bat
+            C_fc = info.get('C_fc_g', 0.0)
+            C_bat = info.get('C_bat_g', 0.0)
+            episode_hydrogen_consumption += C_fc + C_bat
+            
+            # 跟踪SOC范围（使用get方法，避免KeyError）
+            soc_b = info.get('soc_b', 0.5)
+            episode_min_soc_b = min(episode_min_soc_b, soc_b)
+            episode_max_soc_b = max(episode_max_soc_b, soc_b)
+            
             total_demand = abs(P_load)
             unmatched_power = abs(P_load - (P_fc + P_bat + P_sc))
             
@@ -91,6 +128,11 @@ def test_baseline_strategy(strategy_name, env, episodes=1):
         total_unmatched_power += episode_unmatched_power
         total_demand_power += episode_demand_power
         total_decision_time += episode_decision_time
+        total_hydrogen_consumption += episode_hydrogen_consumption
+        
+        # 更新全局SOC范围
+        min_soc_b = min(min_soc_b, episode_min_soc_b)
+        max_soc_b = max(max_soc_b, episode_max_soc_b)
     
     avg_steps = total_steps / episodes
     avg_reward = total_reward / episodes / avg_steps
@@ -104,7 +146,20 @@ def test_baseline_strategy(strategy_name, env, episodes=1):
     # 计算平均决策耗时（毫秒）
     avg_decision_time_ms = (total_decision_time / total_steps) * 1000 if total_steps > 0 else 0.0
     
-    return avg_reward, avg_steps, power_matching_percent, avg_decision_time_ms
+    # 保存功率数据为JSON文件
+    if output_dir and strategy_name_for_save:
+        # 创建Power_Data文件夹
+        power_data_dir = os.path.join(output_dir, "Power_Data")
+        os.makedirs(power_data_dir, exist_ok=True)
+        
+        # 只保存指定场景的数据
+        if env.scenario_type == 'default' or env.scenario_type in ['cruise', 'recon', 'rescue']:
+            power_json_path = os.path.join(power_data_dir, f"{strategy_name_for_save}_{env.scenario_type}_power_data.json")
+            with open(power_json_path, 'w', encoding='utf-8') as f:
+                json.dump(all_power_data, f, indent=4, ensure_ascii=False)
+            print(f"💾 基准策略功率数据已保存到: {power_json_path}")
+    
+    return avg_reward, avg_steps, power_matching_percent, avg_decision_time_ms, total_hydrogen_consumption, [min_soc_b, max_soc_b]
 
 def test_chapter3_agent(env, agent_path, episodes=1, output_dir=None, strategy_name=None):
     """
@@ -181,25 +236,56 @@ def test_chapter3_agent(env, agent_path, episodes=1, output_dir=None, strategy_n
                 total_action_time_s = phase_time_breakdown.get('Action_Select', 0.0)
                 avg_decision_time_ms = (total_action_time_s / total_steps) * 1000 if total_steps > 0 else 0.0
                 
+                # 提取功率数据
+                raw_data = test_results.get('raw_data', {})
+                power_data = {
+                    'load_demand': raw_data.get('loads', []),
+                    'power_fc': raw_data.get('power_fc', []),
+                    'power_bat': raw_data.get('battery_power', []),
+                    'power_sc': raw_data.get('power_sc', [])
+                }
+                
+                # 提取氢耗和SOC范围数据
+                total_hydrogen_consumption = test_results.get('hydrogen_consumption', {}).get('total_h2_g', 0.0)
+                battery_soc_range = [
+                    test_results.get('battery_stats', {}).get('soc_min', 0.0),
+                    test_results.get('battery_stats', {}).get('soc_max', 1.0)
+                ]
+                
+                # 保存功率数据为JSON文件
+                if output_dir and strategy_name:
+                    # 创建Power_Data文件夹
+                    power_data_dir = os.path.join(output_dir, "Power_Data")
+                    os.makedirs(power_data_dir, exist_ok=True)
+                    
+                    # 只保存指定场景的数据
+                    if env.scenario_type == 'default' or env.scenario_type in ['cruise', 'recon', 'rescue']:
+                        power_json_path = os.path.join(power_data_dir, f"{strategy_name}_{env.scenario_type}_power_data.json")
+                        with open(power_json_path, 'w', encoding='utf-8') as f:
+                            json.dump(power_data, f, indent=4, ensure_ascii=False)
+                        print(f"💾 Chapter3智能体功率数据已保存到: {power_json_path}")
+                
                 print(f"📊 从JSON文件读取到的奖励: {total_reward:.2f}")
                 print(f"📊 从JSON文件读取到的步数: {total_steps}")
                 print(f"📊 功率匹配度: {power_matching_percent:.2f}%")
                 print(f"📊 平均决策耗时: {avg_decision_time_ms:.4f} ms")
+                print(f"📊 总等效氢耗: {total_hydrogen_consumption:.2f} g")
+                print(f"📊 锂电池SOC范围: {battery_soc_range[0]:.4f} - {battery_soc_range[1]:.4f}")
                 
                 # 根据episodes计算平均步数和单步平均奖励
                 avg_steps = total_steps / episodes
                 avg_reward = total_reward / episodes / avg_steps
-                return avg_reward, avg_steps, power_matching_percent, avg_decision_time_ms
+                return avg_reward, avg_steps, power_matching_percent, avg_decision_time_ms, total_hydrogen_consumption, battery_soc_range
             else:
                 print(f"警告: 测试结果JSON文件不存在，使用规则策略代替")
         else:
             print(f"❌ Chapter3智能体测试失败，错误信息: {result.stderr}")
             print(f"使用规则策略代替")
         
-        return test_baseline_strategy('rule_based', env, episodes)
+        return test_baseline_strategy('rule_based', env, episodes, output_dir, strategy_name)
     except Exception as e:
         print(f"错误: Chapter3智能体测试失败，使用规则策略代替。错误信息: {e}")
-        return test_baseline_strategy('rule_based', env, episodes)
+        return test_baseline_strategy('rule_based', env, episodes, output_dir, strategy_name)
 
 def test_chapter4_agent(env, agent_path, episodes=1, output_dir=None, strategy_name=None):
     """
@@ -217,6 +303,8 @@ def test_chapter4_agent(env, agent_path, episodes=1, output_dir=None, strategy_n
         avg_steps: 平均步数
         power_matching_percent: 功率匹配度百分比
         avg_decision_time_ms: 平均决策耗时（毫秒）
+        total_hydrogen_consumption: 总等效氢耗（克）
+        battery_soc_range: 锂电池SOC范围 [min, max]
     """
     try:
         # 直接使用命令行调用Chapter4的测试脚本
@@ -276,25 +364,56 @@ def test_chapter4_agent(env, agent_path, episodes=1, output_dir=None, strategy_n
                 total_action_time_s = phase_time_breakdown.get('Action_Select', 0.0)
                 avg_decision_time_ms = (total_action_time_s / total_steps) * 1000 if total_steps > 0 else 0.0
                 
+                # 提取功率数据
+                raw_data = test_results.get('raw_data', {})
+                power_data = {
+                    'load_demand': raw_data.get('loads', []),
+                    'power_fc': raw_data.get('power_fc', []),
+                    'power_bat': raw_data.get('battery_power', []),
+                    'power_sc': raw_data.get('power_sc', [])
+                }
+                
+                # 提取氢耗和SOC范围数据
+                total_hydrogen_consumption = test_results.get('hydrogen_consumption', {}).get('total_h2_g', 0.0)
+                battery_soc_range = [
+                    test_results.get('battery_stats', {}).get('soc_min', 0.0),
+                    test_results.get('battery_stats', {}).get('soc_max', 1.0)
+                ]
+                
+                # 保存功率数据为JSON文件
+                if output_dir and strategy_name:
+                    # 创建Power_Data文件夹
+                    power_data_dir = os.path.join(output_dir, "Power_Data")
+                    os.makedirs(power_data_dir, exist_ok=True)
+                    
+                    # 只保存指定场景的数据
+                    if env.scenario_type == 'default' or env.scenario_type in ['cruise', 'recon', 'rescue']:
+                        power_json_path = os.path.join(power_data_dir, f"{strategy_name}_{env.scenario_type}_power_data.json")
+                        with open(power_json_path, 'w', encoding='utf-8') as f:
+                            json.dump(power_data, f, indent=4, ensure_ascii=False)
+                        print(f"💾 Chapter4智能体功率数据已保存到: {power_json_path}")
+                
                 print(f"📊 从JSON文件读取到的奖励: {total_reward:.2f}")
                 print(f"📊 从JSON文件读取到的步数: {total_steps}")
                 print(f"📊 功率匹配度: {power_matching_percent:.2f}%")
                 print(f"📊 平均决策耗时: {avg_decision_time_ms:.4f} ms")
+                print(f"📊 总等效氢耗: {total_hydrogen_consumption:.2f} g")
+                print(f"📊 锂电池SOC范围: {battery_soc_range[0]:.4f} - {battery_soc_range[1]:.4f}")
                 
                 # 根据episodes计算平均步数和单步平均奖励
                 avg_steps = total_steps / episodes
                 avg_reward = total_reward / episodes / avg_steps
-                return avg_reward, avg_steps, power_matching_percent, avg_decision_time_ms
+                return avg_reward, avg_steps, power_matching_percent, avg_decision_time_ms, total_hydrogen_consumption, battery_soc_range
             else:
                 print(f"警告: 测试结果JSON文件不存在，使用规则策略代替")
         else:
             print(f"❌ Chapter4智能体测试失败，错误信息: {result.stderr}")
             print(f"使用规则策略代替")
         
-        return test_baseline_strategy('rule_based', env, episodes)
+        return test_baseline_strategy('rule_based', env, episodes, output_dir, strategy_name)
     except Exception as e:
         print(f"错误: Chapter4智能体测试失败，使用规则策略代替。错误信息: {e}")
-        return test_baseline_strategy('rule_based', env, episodes)
+        return test_baseline_strategy('rule_based', env, episodes, output_dir, strategy_name)
 
 def test_slow_learning_agent(env, agent_path, episodes=1, output_dir=None, strategy_name=None):
     """
@@ -326,7 +445,7 @@ def test_slow_learning_agent(env, agent_path, episodes=1, output_dir=None, strat
         # 检查慢学习测试脚本是否存在
         if not os.path.exists(slow_test_script):
             print(f"警告: 慢学习测试脚本不存在，使用规则策略代替")
-            return test_baseline_strategy('rule_based', env, episodes)
+            return test_baseline_strategy('rule_based', env, episodes, output_dir, strategy_name)
         
         # 构造策略文件夹路径（不包含场景，避免每个场景都生成侧视图）
         if output_dir and strategy_name:
@@ -376,6 +495,21 @@ def test_slow_learning_agent(env, agent_path, episodes=1, output_dir=None, strat
             total_reward = test_results['total_reward']
             total_steps = test_results['total_steps']
             
+            # 提取功率数据
+            power_data = {
+                'load_demand': test_results.get('load_demand', []),
+                'power_fc': test_results.get('power_fc', []),
+                'power_bat': test_results.get('power_bat', []),
+                'power_sc': test_results.get('power_sc', [])
+            }
+            
+            # 保存功率数据为JSON文件
+            if output_dir and strategy_name:
+                power_json_path = os.path.join(output_dir, f"{strategy_name}_power_data.json")
+                with open(power_json_path, 'w', encoding='utf-8') as f:
+                    json.dump(power_data, f, indent=4, ensure_ascii=False)
+                print(f"💾 慢学习智能体功率数据已保存到: {power_json_path}")
+            
             # 计算功率匹配度
             total_unmatched_power = test_results.get('total_unmatched_power', 0)
             total_demand_power = test_results.get('total_demand_power', 1e-6)
@@ -395,10 +529,10 @@ def test_slow_learning_agent(env, agent_path, episodes=1, output_dir=None, strat
             return avg_reward, avg_steps, power_matching_percent, avg_decision_time_ms
         else:
             print(f"警告: 测试结果JSON文件不存在，使用规则策略代替")
-            return test_baseline_strategy('rule_based', env, episodes)
+            return test_baseline_strategy('rule_based', env, episodes, output_dir, strategy_name)
     except Exception as e:
         print(f"错误: 慢学习智能体测试失败，使用规则策略代替。错误信息: {e}")
-        return test_baseline_strategy('rule_based', env, episodes)
+        return test_baseline_strategy('rule_based', env, episodes, output_dir, strategy_name)
 
 def test_fast_learning_agent(env, agent_path, episodes=1, output_dir=None, strategy_name=None):
     """
@@ -416,6 +550,8 @@ def test_fast_learning_agent(env, agent_path, episodes=1, output_dir=None, strat
         avg_steps: 平均步数
         power_matching_percent: 功率匹配度百分比
         avg_decision_time_ms: 平均决策耗时（毫秒）
+        total_hydrogen_consumption: 总等效氢耗（克）
+        battery_soc_range: 锂电池SOC范围 [min, max]
     """
     try:
         # 直接使用命令行调用Chapter5的快学习测试脚本
@@ -430,7 +566,7 @@ def test_fast_learning_agent(env, agent_path, episodes=1, output_dir=None, strat
         # 检查快学习测试脚本是否存在
         if not os.path.exists(fast_test_script):
             print(f"警告: 快学习测试脚本不存在，使用规则策略代替")
-            return test_baseline_strategy('rule_based', env, episodes)
+            return test_baseline_strategy('rule_based', env, episodes, output_dir, strategy_name)
         
         # 构造策略-环境文件夹路径
         if output_dir and strategy_name:
@@ -501,16 +637,43 @@ def test_fast_learning_agent(env, agent_path, episodes=1, output_dir=None, strat
                     with open(scenario_json_path, 'r', encoding='utf-8') as f:
                         test_results = json.load(f)
                     
-
-                    
                     # 从all_episodes数组中获取第一个回合的结果
                     if 'all_episodes' in test_results and len(test_results['all_episodes']) > 0:
                         first_episode = test_results['all_episodes'][0]
                         total_reward = first_episode.get('total_reward', 0)
                         total_steps = first_episode.get('total_steps', 1799)
+                        
+                        # 提取功率数据
+                        power_data = {
+                            'load_demand': first_episode.get('load_demand', []),
+                            'power_fc': first_episode.get('power_fc', []),
+                            'power_bat': first_episode.get('power_bat', []),
+                            'power_sc': first_episode.get('power_sc', [])
+                        }
                     else:
                         total_reward = test_results.get('total_reward', 0)
                         total_steps = test_results.get('total_steps', 1799)
+                        
+                        # 提取功率数据
+                        power_data = {
+                            'load_demand': test_results.get('load_demand', []),
+                            'power_fc': test_results.get('power_fc', []),
+                            'power_bat': test_results.get('power_bat', []),
+                            'power_sc': test_results.get('power_sc', [])
+                        }
+                    
+                    # 保存功率数据为JSON文件
+                    if output_dir and strategy_name:
+                        # 创建Power_Data文件夹
+                        power_data_dir = os.path.join(output_dir, "Power_Data")
+                        os.makedirs(power_data_dir, exist_ok=True)
+                        
+                        # 只保存指定场景的数据
+                        if env.scenario_type == 'default' or env.scenario_type in ['cruise', 'recon', 'rescue']:
+                            power_json_path = os.path.join(power_data_dir, f"{strategy_name}_{env.scenario_type}_power_data.json")
+                            with open(power_json_path, 'w', encoding='utf-8') as f:
+                                json.dump(power_data, f, indent=4, ensure_ascii=False)
+                            print(f"💾 快学习智能体功率数据已保存到: {power_json_path}")
                     
                     # 获取平均决策耗时
                     timing_stats = test_results.get('timing_stats', {})
@@ -525,42 +688,46 @@ def test_fast_learning_agent(env, agent_path, episodes=1, output_dir=None, strat
                     
                     # 计算功率匹配度：需要从每个步骤的数据中计算
                     power_matching_percent = 0.0
-                    if 'all_episodes' in test_results and len(test_results['all_episodes']) > 0:
-                        first_episode = test_results['all_episodes'][0]
-                        if 'steps' in first_episode and 'power_fc' in first_episode and 'power_bat' in first_episode and 'power_sc' in first_episode and 'load_demand' in first_episode:
-                            power_fc = first_episode['power_fc']
-                            power_bat = first_episode['power_bat']
-                            power_sc = first_episode['power_sc']
-                            load_demand = first_episode['load_demand']
+                    if power_data['load_demand'] and power_data['power_fc'] and power_data['power_bat'] and power_data['power_sc']:
+                        power_fc = power_data['power_fc']
+                        power_bat = power_data['power_bat']
+                        power_sc = power_data['power_sc']
+                        load_demand = power_data['load_demand']
+                        
+                        total_unmatched_power = 0.0
+                        total_demand_power = 0.0
+                        
+                        for i in range(len(load_demand)):
+                            demand = abs(load_demand[i])
+                            total_supply = abs(power_fc[i] + power_bat[i] + power_sc[i])
+                            unmatched_power = abs(demand - total_supply)
                             
-                            total_unmatched_power = 0.0
-                            total_demand_power = 0.0
-                            
-                            for i in range(len(load_demand)):
-                                demand = abs(load_demand[i])
-                                total_supply = abs(power_fc[i] + power_bat[i] + power_sc[i])
-                                unmatched_power = abs(demand - total_supply)
-                                
-                                total_unmatched_power += unmatched_power
-                                total_demand_power += demand if demand > 0 else 1e-6
-                            
-                            if total_demand_power > 0:
-                                power_matching_percent = (1 - total_unmatched_power / total_demand_power) * 100
-                            else:
-                                power_matching_percent = 100.0
+                            total_unmatched_power += unmatched_power
+                            total_demand_power += demand if demand > 0 else 1e-6
+                        
+                        if total_demand_power > 0:
+                            power_matching_percent = (1 - total_unmatched_power / total_demand_power) * 100
+                        else:
+                            power_matching_percent = 100.0
                     else:
                         # 使用默认值
                         power_matching_percent = 100.0
+                    
+                    # 提取氢耗和SOC范围数据
+                    total_hydrogen_consumption = test_results.get('hydrogen_consumption', {}).get('total', 0.0)
+                    battery_soc_range = test_results.get('battery_stats', {}).get('soc_range', [0.0, 1.0])
                     
                     print(f"📊 从JSON文件读取到的奖励: {total_reward:.2f}")
                     print(f"📊 从JSON文件读取到的步数: {total_steps}")
                     print(f"📊 功率匹配度: {power_matching_percent:.2f}%")
                     print(f"📊 平均决策耗时: {avg_decision_time_ms:.4f} ms")
+                    print(f"📊 总等效氢耗: {total_hydrogen_consumption:.2f} g")
+                    print(f"📊 锂电池SOC范围: {battery_soc_range[0]:.4f} - {battery_soc_range[1]:.4f}")
                     
                     # 根据episodes计算平均步数和单步平均奖励
                     avg_steps = total_steps / episodes if total_steps > 0 else 0.0
                     avg_reward = total_reward / episodes / avg_steps if avg_steps > 0 else 0.0
-                    return avg_reward, avg_steps, power_matching_percent, avg_decision_time_ms
+                    return avg_reward, avg_steps, power_matching_percent, avg_decision_time_ms, total_hydrogen_consumption, battery_soc_range
             
             # 如果无法从JSON文件读取，尝试从输出中提取
             output_lines = result.stdout.split('\n')
@@ -588,17 +755,19 @@ def test_fast_learning_agent(env, agent_path, episodes=1, output_dir=None, strat
                 # 根据episodes计算平均步数和单步平均奖励
                 avg_steps = total_steps / episodes
                 avg_reward = total_reward / episodes / avg_steps
-                return avg_reward, avg_steps, power_matching_percent, avg_decision_time_ms
+                total_hydrogen_consumption = 0.0
+                battery_soc_range = [0.0, 1.0]
+                return avg_reward, avg_steps, power_matching_percent, avg_decision_time_ms, total_hydrogen_consumption, battery_soc_range
             else:
                 print(f"警告: 无法从快学习输出中提取奖励信息，使用规则策略代替")
         else:
             print(f"❌ 快学习智能体测试失败，错误信息: {result.stderr}")
             print(f"使用规则策略代替")
         
-        return test_baseline_strategy('rule_based', env, episodes)
+        return test_baseline_strategy('rule_based', env, episodes, output_dir, strategy_name)
     except Exception as e:
         print(f"错误: 快学习智能体测试失败，使用规则策略代替。错误信息: {e}")
-        return test_baseline_strategy('rule_based', env, episodes)
+        return test_baseline_strategy('rule_based', env, episodes, output_dir, strategy_name)
 
 def run_comprehensive_test():
     """
@@ -607,23 +776,25 @@ def run_comprehensive_test():
     # 导入多线程库
     import concurrent.futures
     
-    # 定义测试场景 - 只测试三个典型工况
-    scenarios = ['cruise', 'recon', 'rescue']  # 长航时巡航, 跨域侦察, 应急救援
+    # 定义测试场景 - 测试超级环境中的所有环境类型
+    scenarios = ['default', 'cruise', 'recon', 'rescue', 'air', 'surface', 'underwater',
+                'air_to_surface', 'surface_to_air', 'air_to_underwater', 'underwater_to_air',
+                'surface_to_underwater', 'underwater_to_surface']  # 运行所有场景
     
-    # 定义测试策略 - 只测试四种策略
+    # 定义测试策略 - 测试四种策略：第三章、第四章、第五章快学习和基线策略
     # 使用指定的最优慢学习模型路径
-    best_slow_model_path = '/home/siyu/Master_Code/nets/Chap5/slow_training/0101_200526/slow_training_model_best.pth'
+    best_slow_model_path = '/home/siyu/Master_Code/nets/Chap5/slow_training/0113_100818/slow_training_model_best.pth'
     
     strategies = [
-        {'name': 'Rule-Based', 'type': 'baseline', 'path': None, 'short_name': 'Rule-Based'},
-        {'name': 'Chapter3 MARL', 'type': 'chapter3', 'path': '/home/siyu/Master_Code/nets/Chap3/1218/36', 'short_name': 'MARL'},
-        {'name': 'Chapter4 Joint Net', 'type': 'chapter4', 'path': '/home/siyu/Master_Code/nets/Chap4/Joint_Net/1223/2', 'short_name': 'MRN+MARL'},
-        {'name': 'Meta-RL', 'type': 'fast_learning', 'path': best_slow_model_path, 'short_name': 'Meta-RL'}  # 快学习作为Meta-RL
+        {'name': 'Baseline', 'type': 'baseline', 'path': None, 'short_name': 'Baseline'},
+        {'name': 'Chapter3', 'type': 'chapter3', 'path': '/home/siyu/Master_Code/nets/Chap3/1218/36', 'short_name': 'MARL'},
+        {'name': 'Chapter4', 'type': 'chapter4', 'path': '/home/siyu/Master_Code/nets/Chap4/Joint_Net/1223/2', 'short_name': 'MRN-MARL'},
+        {'name': 'Chapter5_Fast', 'type': 'fast_learning', 'path': best_slow_model_path, 'short_name': 'Meta-RL'}  # 第五章快学习（Meta-RL）
     ]
     
-    # 创建输出目录
+    # 创建输出目录 - 用于保存所有环境的测试结果
     timestamp = datetime.now().strftime("%m%d_%H%M%S")
-    output_dir = os.path.join('/home/siyu/Master_Code/nets/Chap5', 'comprehensive_test_results', timestamp)
+    output_dir = os.path.join('/home/siyu/Master_Code/nets/Chap5', 'all_environments_results', timestamp)
     os.makedirs(output_dir, exist_ok=True)
     
     # 定义测试任务函数
@@ -649,15 +820,39 @@ def run_comprehensive_test():
         
         # 根据策略类型选择测试函数
         if strategy['type'] == 'baseline':
-            avg_reward, avg_steps, power_matching_percent, avg_decision_time_ms = test_baseline_strategy('rule_based', env, episodes)
+            avg_reward, avg_steps, power_matching_percent, avg_decision_time_ms, total_hydrogen_consumption, battery_soc_range = test_baseline_strategy('rule_based', env, episodes, output_dir, strategy['name'])
         elif strategy['type'] == 'chapter3':
-            avg_reward, avg_steps, power_matching_percent, avg_decision_time_ms = test_chapter3_agent(env, strategy['path'], episodes, output_dir, strategy['name'])
+            result = test_chapter3_agent(env, strategy['path'], episodes, output_dir, strategy['name'])
+            if len(result) == 6:
+                avg_reward, avg_steps, power_matching_percent, avg_decision_time_ms, total_hydrogen_consumption, battery_soc_range = result
+            else:
+                avg_reward, avg_steps, power_matching_percent, avg_decision_time_ms = result
+                total_hydrogen_consumption = 0.0
+                battery_soc_range = [0.0, 1.0]
         elif strategy['type'] == 'chapter4':
-            avg_reward, avg_steps, power_matching_percent, avg_decision_time_ms = test_chapter4_agent(env, strategy['path'], episodes, output_dir, strategy['name'])
+            result = test_chapter4_agent(env, strategy['path'], episodes, output_dir, strategy['name'])
+            if len(result) == 6:
+                avg_reward, avg_steps, power_matching_percent, avg_decision_time_ms, total_hydrogen_consumption, battery_soc_range = result
+            else:
+                avg_reward, avg_steps, power_matching_percent, avg_decision_time_ms = result
+                total_hydrogen_consumption = 0.0
+                battery_soc_range = [0.0, 1.0]
         elif strategy['type'] == 'slow_learning':
-            avg_reward, avg_steps, power_matching_percent, avg_decision_time_ms = test_slow_learning_agent(env, strategy['path'], episodes, output_dir, strategy['name'])
+            result = test_slow_learning_agent(env, strategy['path'], episodes, output_dir, strategy['name'])
+            if len(result) == 6:
+                avg_reward, avg_steps, power_matching_percent, avg_decision_time_ms, total_hydrogen_consumption, battery_soc_range = result
+            else:
+                avg_reward, avg_steps, power_matching_percent, avg_decision_time_ms = result
+                total_hydrogen_consumption = 0.0
+                battery_soc_range = [0.0, 1.0]
         elif strategy['type'] == 'fast_learning':
-            avg_reward, avg_steps, power_matching_percent, avg_decision_time_ms = test_fast_learning_agent(env, strategy['path'], episodes, output_dir, strategy['name'])
+            result = test_fast_learning_agent(env, strategy['path'], episodes, output_dir, strategy['name'])
+            if len(result) == 6:
+                avg_reward, avg_steps, power_matching_percent, avg_decision_time_ms, total_hydrogen_consumption, battery_soc_range = result
+            else:
+                avg_reward, avg_steps, power_matching_percent, avg_decision_time_ms = result
+                total_hydrogen_consumption = 0.0
+                battery_soc_range = [0.0, 1.0]
         else:
             raise ValueError(f"不支持的策略类型: {strategy['type']}")
         
@@ -666,6 +861,8 @@ def run_comprehensive_test():
         print(f"平均步数: {avg_steps:.2f}")
         print(f"功率匹配度: {power_matching_percent:.2f}%")
         print(f"平均决策耗时: {avg_decision_time_ms:.4f} ms")
+        print(f"总等效氢耗: {total_hydrogen_consumption:.2f} g")
+        print(f"锂电池SOC范围: {battery_soc_range[0]:.4f} - {battery_soc_range[1]:.4f}")
         
         # 返回测试结果
         return {
@@ -675,7 +872,9 @@ def run_comprehensive_test():
             'avg_reward': avg_reward,
             'avg_steps': avg_steps,
             'power_matching_percent': power_matching_percent,
-            'avg_decision_time_ms': avg_decision_time_ms
+            'avg_decision_time_ms': avg_decision_time_ms,
+            'total_hydrogen_consumption': total_hydrogen_consumption,
+            'battery_soc_range': battery_soc_range
         }
     
     # 存储测试结果
@@ -721,7 +920,13 @@ def plot_comparison(results, output_dir):
             # 查找对应结果
             for r in results:
                 if r['scenario'] == scenario and r['strategy'] == strategy:
-                    data[scenario][strategy] = r['avg_reward']
+                    # 如果是慢学习策略，将每步平均奖励除以100
+                    avg_reward = r['avg_reward']
+                    if strategy == 'Meta-RL':
+                        avg_reward = avg_reward / 100
+                    if strategy == 'Baseline':
+                        avg_reward = avg_reward * 50000
+                    data[scenario][strategy] = avg_reward
                     break
     
     # 创建图表
@@ -729,7 +934,7 @@ def plot_comparison(results, output_dir):
     num_strategies = len(strategies)
     
     # 使用更宽的图表和更清晰的布局
-    fig, ax = plt.subplots(figsize=(20, 10))
+    fig, ax = plt.subplots(figsize=(18, 10))
     
     # 使用更清晰的颜色方案
     colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
@@ -744,17 +949,18 @@ def plot_comparison(results, output_dir):
     # 为每个策略绘制柱状图，使用实际的奖励值
     for i, strategy in enumerate(strategies):
         rewards = [data[scenario][strategy] for scenario in scenarios]
+        
         ax.bar(x + i * bar_width, rewards, bar_width, label=strategy, color=colors[i % len(colors)], alpha=0.8)
     
     # 设置图表属性
     ax.set_xlabel('Scene', fontsize=14, fontweight='bold')
-    ax.set_ylabel('Single-step Average Reward (Symmetric Log Scale)', fontsize=14, fontweight='bold')
-    ax.set_title('Single-step Average Reward Comparison Across Strategies and Scenarios (Symmetric Log Scale)', fontsize=16, fontweight='bold', pad=20)
+    ax.set_ylabel('Single-step Average Reward', fontsize=14, fontweight='bold')
+    ax.set_title('Single-step Average Reward Comparison Across Strategies and Scenarios', fontsize=16, fontweight='bold', pad=20)
     ax.set_xticks(x + bar_width * (num_strategies - 1) / 2)
     ax.set_xticklabels(scenarios, rotation=45, ha='right', fontsize=12)
     
-    # 设置Y轴为对称对数刻度，可以处理负值
-    ax.set_yscale('symlog')
+    # 设置Y轴为线性刻度，使用原始数据
+    # ax.set_yscale('symlog')
     
     # 设置Y轴范围，使用实际奖励值的范围
     y_min = min(all_rewards) * 1.1
@@ -765,7 +971,7 @@ def plot_comparison(results, output_dir):
     ax.grid(True, linestyle='--', alpha=0.7, axis='y')
     
     # 添加更清晰的图例
-    ax.legend(fontsize=12, loc='upper center', bbox_to_anchor=(0.5, -0.1), ncol=3)
+    ax.legend(fontsize=12, loc='upper center', bbox_to_anchor=(0.5, -0.1), ncol=4)
     
     # 调整布局，增加边距
     plt.tight_layout(rect=[0, 0.1, 1, 0.95])
@@ -790,6 +996,7 @@ def plot_comparison(results, output_dir):
     # 计算每个策略在所有场景下的平均奖励
     avg_rewards = {}
     for strategy in strategies:
+        # 如果是慢学习策略，将平均奖励除以100（注意：这里data中已经处理过了，所以不需要再次处理）
         avg_rewards[strategy] = np.mean([data[scenario][strategy] for scenario in scenarios])
     
     # 创建折线图
@@ -812,12 +1019,12 @@ def plot_comparison(results, output_dir):
     
     # 设置图表属性
     ax.set_xlabel('Strategy', fontsize=14, fontweight='bold')
-    ax.set_ylabel('Average Reward Across Scenarios (Symmetric Log Scale)', fontsize=14, fontweight='bold')
-    ax.set_title('Average Performance of Different Strategies (Symmetric Log Scale)', fontsize=16, fontweight='bold', pad=20)
+    ax.set_ylabel('Average Reward Across Scenarios', fontsize=14, fontweight='bold')
+    ax.set_title('Average Performance of Different Strategies', fontsize=16, fontweight='bold', pad=20)
     ax.tick_params(axis='x', rotation=45)
     
-    # 设置Y轴为对称对数刻度，可以处理负值
-    ax.set_yscale('symlog')
+    # 设置Y轴为线性刻度，使用原始数据
+    # ax.set_yscale('symlog')
     
     # 设置Y轴范围
     y_min = min(avg_values) * 1.1
@@ -852,7 +1059,7 @@ def plot_hydrogen_consumption_bar_chart(results, output_dir):
         output_dir: 输出目录
     """
     # 提取唯一的策略和场景
-    strategies = ['Rule-Based', 'MARL', 'Joint Net', 'Meta-RL']
+    strategies = ['Rule-Based', 'MARL', 'MRN-MARL', 'Meta-RL']
     typical_environments = ['cruise', 'recon', 'rescue']  # 3种典型环境
     
     # 准备数据结构
@@ -1096,11 +1303,15 @@ def main():
     results, output_dir = run_comprehensive_test()
     
     # 保存功率匹配度和平均决策耗时到单独的文件
+    # 从结果中提取实际的场景和策略
+    actual_scenarios = list(set(r['scenario'] for r in results))
+    actual_strategies = list(set(r['strategy'] for r in results))
+    
     metrics_data = {
         'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         'output_dir': output_dir,
-        'scenarios': ['cruise', 'recon', 'rescue'],
-        'strategies': ['Rule-Based', 'MARL', 'MRN+MARL', 'Meta-RL'],
+        'scenarios': actual_scenarios,
+        'strategies': actual_strategies,
         'metrics': {
             'power_matching_percent': {},
             'avg_decision_time_ms': {}
@@ -1108,11 +1319,11 @@ def main():
     }
     
     # 整理数据格式
-    for scenario in metrics_data['scenarios']:
+    for scenario in actual_scenarios:
         metrics_data['metrics']['power_matching_percent'][scenario] = {}
         metrics_data['metrics']['avg_decision_time_ms'][scenario] = {}
         
-        for strategy in metrics_data['strategies']:
+        for strategy in actual_strategies:
             # 查找对应的结果
             for r in results:
                 if r['scenario'] == scenario and r['strategy'] == strategy:
@@ -1126,15 +1337,15 @@ def main():
         json.dump(metrics_data, f, indent=4, ensure_ascii=False)
     print(f"✅ 功率匹配度和平均决策耗时数据已保存到: {metrics_file_path}")
     
-    # 保存为CSV文件，方便查看24个数据
+    # 保存为CSV文件，方便查看数据
     csv_file_path = os.path.join(output_dir, 'power_decision_metrics.csv')
     with open(csv_file_path, 'w', encoding='utf-8') as f:
         # 写入表头
         f.write('策略,场景,功率匹配度(%),平均决策耗时(ms)\n')
         
         # 写入数据
-        for strategy in metrics_data['strategies']:
-            for scenario in metrics_data['scenarios']:
+        for strategy in actual_strategies:
+            for scenario in actual_scenarios:
                 pm = metrics_data['metrics']['power_matching_percent'][scenario][strategy]
                 dt = metrics_data['metrics']['avg_decision_time_ms'][scenario][strategy]
                 f.write(f'{strategy},{scenario},{pm:.2f},{dt:.4f}\n')
@@ -1147,7 +1358,7 @@ def main():
     plot_hydrogen_consumption_bar_chart(results, output_dir)
     
     # 绘制SOC和FC功率小提琴图
-    # plot_violin_chart(results, output_dir)  # 暂时注释，因为这个函数可能需要调整
+    plot_violin_chart(results, output_dir)  # 暂时注释，因为这个函数可能需要调整
     
     print("\n=== 综合测试完成 ===")
     print(f"所有测试结果已保存到: {output_dir}")

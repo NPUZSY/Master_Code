@@ -171,7 +171,7 @@ if __name__ == "__main__":
                         choices=EnvUltra.SCENARIO_TYPES, 
                         help='测试场景类型')
     parser.add_argument('--strategy', type=str, default='rule_based', 
-                        choices=['rule_based', 'dp'], 
+                        choices=['rule_based'], 
                         help='使用的策略类型')
     parser.add_argument('--output-dir', type=str, default='', 
                         help='输出目录')
@@ -283,8 +283,14 @@ if __name__ == "__main__":
     # 生成时间轴
     times = np.arange(len(power_data['power_fc']))
     
-    # 绘图配置
+    # 绘图配置 - 与Chapter4/test_Joint.py保持完全一致的颜色和线条样式配置
     article_color = ['#f09639', '#c84343', '#42985e', '#8a7ab5', '#3570a8']
+    power_colors = {
+        'load': article_color[0],  # 功率需求 - 橙色
+        'fc': article_color[1],     # 燃料电池 - 红色
+        'bat': article_color[2],    # 电池 - 绿色
+        'sc': 'k'                   # 超级电容 - 黑色
+    }
     colors = article_color
     LINES_ALPHA = 1
     LABEL_FONT_SIZE = 18
@@ -293,11 +299,11 @@ if __name__ == "__main__":
     fig, ax1 = plt.subplots(figsize=(15, 5))
     fig.subplots_adjust(top=0.965, bottom=0.125, left=0.085, right=0.875)
     
-    # 功率曲线
-    l1, = ax1.plot(times, power_data['load_power'], label='Power Demand', color=colors[0], alpha=LINES_ALPHA, linewidth=2)
-    l2, = ax1.plot(times, power_data['power_fc'], label='Power Fuel Cell', color=colors[1], alpha=LINES_ALPHA, linewidth=2)
-    l3, = ax1.plot(times, power_data['power_bat'], label='Power Battery', color=colors[2], alpha=LINES_ALPHA, linewidth=2)
-    l6, = ax1.plot(times, power_data['power_sc'], label='Power SuperCap', color='k', linestyle='--', alpha=LINES_ALPHA, linewidth=2)
+    # 功率曲线 - 与Chapter4/test_Joint.py保持完全一致的颜色和线条样式
+    l1, = ax1.plot(times, power_data['load_power'], label='Power Demand', color=power_colors['load'], alpha=LINES_ALPHA, linewidth=2)
+    l2, = ax1.plot(times, power_data['power_fc'], label='Power Fuel Cell', color=power_colors['fc'], alpha=LINES_ALPHA, linewidth=2)
+    l3, = ax1.plot(times, power_data['power_bat'], label='Power Battery', color=power_colors['bat'], alpha=LINES_ALPHA, linewidth=2)
+    l6, = ax1.plot(times, power_data['power_sc'], label='Power SuperCap', color=power_colors['sc'], alpha=LINES_ALPHA, linewidth=2, linestyle='--')
     
     # 配置主坐标轴（功率轴）
     ax1.set_xlabel('Time/s', fontsize=LABEL_FONT_SIZE)
@@ -308,20 +314,20 @@ if __name__ == "__main__":
     ax1.grid(linestyle='--', linewidth=0.5, alpha=0.5)
     ax1.set_title(f'Power Distribution - {args.scenario} Scenario - {args.strategy} Strategy', fontsize=16, fontweight='bold')
     
-    # SOC曲线（右轴1）
+    # SOC曲线（右轴1）- 与Chapter4/test_Joint.py保持完全一致的颜色和线条样式
     ax2 = ax1.twinx()
-    l4, = ax2.plot(times, power_data['soc_bat'], label='Battery SOC', color=colors[3], alpha=LINES_ALPHA, linewidth=1.5)
-    l7, = ax2.plot(times, power_data['soc_sc'], label='SuperCap SOC', color='grey', linestyle=':', alpha=LINES_ALPHA, linewidth=1.5)
+    l4, = ax2.plot(times, power_data['soc_bat'], label='Battery SOC', color=article_color[3], alpha=LINES_ALPHA, linewidth=1.5)
+    l7, = ax2.plot(times, power_data['soc_sc'], label='SuperCap SOC', color='grey', alpha=LINES_ALPHA, linewidth=1.5, linestyle=':')
     ax2.set_ylabel('SOC', fontsize=LABEL_FONT_SIZE)
     ax2.tick_params(axis='y', labelsize=LABEL_FONT_SIZE)
     ax2.set_ylim(0, 1.0)
     
-    # 温度曲线（右轴2，向外偏移）
+    # 温度曲线（右轴2，向外偏移）- 与Chapter4/test_Joint.py保持完全一致的颜色和线条样式
     ax3 = ax1.twinx()
     ax3.spines['right'].set_position(('outward', 65))
-    l5, = ax3.plot(times, power_data['temperature'], label='Environment Temperature', color=colors[4], alpha=LINES_ALPHA, linewidth=1.5)
-    ax3.set_ylabel('Environment Temperature/°C', color=colors[4], fontsize=LABEL_FONT_SIZE)
-    ax3.tick_params(axis='y', labelcolor=colors[4], labelsize=LABEL_FONT_SIZE)
+    l5, = ax3.plot(times, power_data['temperature'], label='Environment Temperature', color=article_color[4], alpha=LINES_ALPHA, linewidth=1.5)
+    ax3.set_ylabel('Environment Temperature/°C', color=article_color[4], fontsize=LABEL_FONT_SIZE)
+    ax3.tick_params(axis='y', labelcolor=article_color[4], labelsize=LABEL_FONT_SIZE)
     ax3.set_ylim(-25, 40)
     
     # 绘制模态背景

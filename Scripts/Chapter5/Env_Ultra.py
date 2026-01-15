@@ -77,8 +77,8 @@ class EnvUltra(gym.Env):
         self.w2 = -0.1
         self.w3 = -0.1
         self.w_sc_punish = 10
-        self.minmatch_punish = 10
-        self.w_fc_tracking = -0.1  # 燃料电池跟踪负载奖励项权重
+        self.match_punish = 100
+        self.w_fc_tracking = -0.0001  # 燃料电池跟踪负载奖励项权重
 
         if self.w1 + self.w2 + self.w3 >= 0:
             print("警告：奖励权重之和非负，可能导致训练异常。")
@@ -727,17 +727,20 @@ class EnvUltra(gym.Env):
         r_bat += abs(soc_b - 0.6) * 5
 
         power_loss = abs(P_load - self.power_fc - actual_bat_power - actual_p_sc)
-        r_match = current_sc_punish + power_loss * self.minmatch_punish
+        r_match = current_sc_punish + power_loss * self.match_punish
         
         # 计算燃料电池跟踪负载的奖励项
-        # fc_tracking_error = abs(P_load - self.power_fc)
-        # r_fc_tracking = fc_tracking_error * self.w_fc_tracking
+        fc_tracking_error = -abs(P_load - self.power_fc)
+        r_fc_tracking = fc_tracking_error * self.w_fc_tracking
 
         reward = float(
-            self.w1 * (C_fc + C_bat) +
-            self.w2 * (r_fc + r_bat) +
+            # self.w1 * (C_fc + C_bat) +
+            # self.w2 * (r_fc + r_bat) +
+            self.w2 * (r_bat) +
             self.w3 * r_match
         ) / self.step_length * 10
+
+        # reward = fc_tracking_error
 
         self.time_stamp += 1
         done = bool(self.time_stamp >= len(self.loads) - 1)
@@ -1436,7 +1439,7 @@ class EnvUltra(gym.Env):
         
         # 创建子图（3行1列，共享X轴）
         fig, axes = plt.subplots(3, 1, figsize=(15, 12), sharex=True)
-        fig.suptitle('Power and Temperature Profiles of Typical Scenarios', fontsize=18, fontweight='bold', y=0.98)
+        fig.suptitle('Power and Temperature Profiles of Typical Scenarios', fontsize=20, fontweight='bold', y=0.96)
         
         # 定义场景配置
         scenarios = [
@@ -1453,12 +1456,12 @@ class EnvUltra(gym.Env):
             # 构建场景剖面
             time, power, temp, modes = build_scenario_profile(scenario_type)
             
-            # 绘制功率曲线
-            ax1.plot(time, power, color=color, linewidth=1.2, label='Power Demand')
+            # 绘制功率需求曲线（与Chapter4/test_Joint.py保持一致，使用橙色）
+            ax1.plot(time, power, color='#f09639', linewidth=1.2, label='Power Demand')
             ax1.fill_between(time, 0, power, color=color, alpha=0.1)
             
-            # 绘制温度曲线（虚线）
-            ax2.plot(time, temp, color='darkred', linestyle='--', linewidth=1.2, label='Temperature')
+            # 绘制温度曲线 - 与Chapter4/test_Joint.py保持完全一致的颜色和线条样式
+            ax2.plot(time, temp, color='#3570a8', linewidth=1.2, label='Temperature')
             
             # 标注模态阶段
             for mode in modes:
@@ -1475,22 +1478,12 @@ class EnvUltra(gym.Env):
                 # 添加模态标签（仅标注主要模态）
                 if 'switch' not in mode['type']:
                     mid_time = (mode['start'] + mode['end']) / 2
-                    ax1.text(mid_time, ax1.get_ylim()[1]*0.7, mode['label'], 
+                    ax1.text(mid_time, ax1.get_ylim()[1]*0.75, mode['label'], 
                             ha='center', va='center', fontsize=9, fontweight='bold',
                             bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
             
-            # 添加基础功率参考线（便于对比不同模态的功率水平）
-            ax1.axhline(y=P_AIR_BASE, color='#1f77b4', linestyle='--', linewidth=1.5, alpha=0.6, label=f'Air Base Power ({P_AIR_BASE}W)')
-            ax1.axhline(y=P_SURFACE_BASE, color='#ff7f0e', linestyle='--', linewidth=1.5, alpha=0.6, label=f'Surface Base Power ({P_SURFACE_BASE}W)')
-            ax1.axhline(y=P_UNDERWATER_BASE, color='#2ca02c', linestyle='--', linewidth=1.5, alpha=0.6, label=f'Underwater Base Power ({P_UNDERWATER_BASE}W)')
-            
-            # 添加温度参考线
-            ax2.axhline(y=T_AIR, color='blue', linestyle=':', linewidth=1.5, alpha=0.6, label=f'Air Temp ({T_AIR}℃)')
-            ax2.axhline(y=T_SURFACE, color='orange', linestyle=':', linewidth=1.5, alpha=0.6, label=f'Surface Temp ({T_SURFACE}℃)')
-            ax2.axhline(y=T_UNDERWATER, color='green', linestyle=':', linewidth=1.5, alpha=0.6, label=f'Underwater Temp ({T_UNDERWATER}℃)')
-            
             # 设置轴属性
-            ax1.set_title(scenario_label, fontsize=14, fontweight='bold', pad=10)
+            ax1.set_title(scenario_label, fontsize=16, fontweight='bold', pad=10)
             ax1.set_ylabel('Power (W)', fontsize=12, fontweight='bold')
             ax1.grid(True, linestyle='--', alpha=0.7)
             ax1.set_ylim(0, max(power)*1.1)
@@ -1518,11 +1511,11 @@ class EnvUltra(gym.Env):
         axes[-1].tick_params(axis='x', labelsize=10)
         
         # 创建figure级别的共享图例（位于所有Axes之上）
-        fig.legend(fig_legend_handles, fig_legend_labels, loc='upper center', fontsize=9, framealpha=0.9, 
-                  bbox_to_anchor=(0.5, 0.92), ncol=6)  # 顶部居中，6列布局
+        fig.legend(fig_legend_handles, fig_legend_labels, loc='upper center', fontsize=14, framealpha=0.9, 
+                  bbox_to_anchor=(0.5, 0.93), ncol=6)  # 顶部居中，6列布局
         
         # 调整布局
-        plt.tight_layout(rect=[0, 0, 1, 0.88])  # 调整顶部边距以容纳图例
+        plt.tight_layout(rect=[0, 0, 1, 0.94])  # 调整顶部边距以容纳图例，减少标题下方空白
         
         # 保存SVG文件
         plt.savefig('./Figures/Fig5-7 Profiles.svg', format='svg', dpi=300, bbox_inches='tight')

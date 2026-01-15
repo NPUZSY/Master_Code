@@ -33,6 +33,8 @@ plt.rcParams['axes.unicode_minus'] = False
 
 # 全局字体大小设置
 FONT_SIZE = 24
+LINES_ALPHA = 1
+LABEL_FONT_SIZE = 18
 
 def run_strategy_test(scenario, strategy, output_base_dir):
     """
@@ -231,8 +233,18 @@ def generate_9_scenarios_power_plot(scenarios, strategy, power_data_dict, output
     fig.subplots_adjust(left=0.04, right=0.94, top=0.92, bottom=0.12, wspace=0.6, hspace=0.3)
     fig.suptitle(f'Power Distribution for 9 Basic Scenarios Rule Based Strategy', fontsize=FONT_SIZE, fontweight='bold', y=0.98)
     
-    # 颜色配置
-    colors = ['#f09639', '#c84343', '#42985e', '#8a7ab5', '#3570a8']
+    # 颜色配置 - 与Chapter4/test_Joint.py和baseline_strategies.py保持完全一致
+    article_color = ['#f09639', '#c84343', '#42985e', '#8a7ab5', '#3570a8']
+    power_colors = {
+        'load': article_color[0],  # 功率需求 - 橙色
+        'fc': article_color[1],     # 燃料电池 - 红色
+        'bat': article_color[2],    # 电池 - 绿色
+        'sc': 'k'                   # 超级电容 - 黑色
+    }
+    colors = article_color
+    LINES_ALPHA = 1
+    LABEL_FONT_SIZE = 18
+
     
     # 模态背景色映射
     mode_colors = {
@@ -259,45 +271,62 @@ def generate_9_scenarios_power_plot(scenarios, strategy, power_data_dict, output
             power_data = power_data_dict[data_key]['power_data']
             times = np.arange(len(power_data['load_power']))
             
-            # 绘制功率曲线
-            ax.plot(times, power_data['load_power'], label='Power Demand', color=colors[0], linewidth=1.5)
-            ax.plot(times, power_data['power_fc'], label='Power Fuel Cell', color=colors[1], linewidth=1.5)
-            ax.plot(times, power_data['power_bat'], label='Power Battery', color=colors[2], linewidth=1.5)
-            ax.plot(times, power_data['power_sc'], label='Power SuperCap', color='k', linestyle='--', linewidth=1.5)
+            # 绘制功率曲线 - 与Chapter4/test_Joint.py保持完全一致的颜色和线条样式
+            ax.plot(times, power_data['load_power'], label='Power Demand', color=power_colors['load'], alpha=LINES_ALPHA, linewidth=2)
+            ax.plot(times, power_data['power_fc'], label='Power Fuel Cell', color=power_colors['fc'], alpha=LINES_ALPHA, linewidth=2)
+            ax.plot(times, power_data['power_bat'], label='Power Battery', color=power_colors['bat'], alpha=LINES_ALPHA, linewidth=2)
+            ax.plot(times, power_data['power_sc'], label='Power SuperCap', color=power_colors['sc'], alpha=LINES_ALPHA, linewidth=2, linestyle='--')
             
-            # 添加SOC曲线（右轴1）
+            # 添加SOC曲线（右轴1）- 与Chapter4/test_Joint.py保持完全一致的颜色和线条样式
             ax2 = ax.twinx()
-            ax2.plot(times, power_data['soc_bat'], label='Battery SOC', color=colors[3], alpha=0.7, linewidth=1.0)
-            ax2.plot(times, power_data['soc_sc'], label='SuperCap SOC', color='grey', linestyle=':', alpha=0.7, linewidth=1.0)
-            ax2.set_ylabel('SOC', fontsize=FONT_SIZE)
+            ax2.plot(times, power_data['soc_bat'], label='Battery SOC', color=article_color[3], alpha=LINES_ALPHA, linewidth=1.5)
+            ax2.plot(times, power_data['soc_sc'], label='SuperCap SOC', color='grey', alpha=LINES_ALPHA, linewidth=1.5, linestyle=':')
+            ax2.set_ylabel('SOC', fontsize=LABEL_FONT_SIZE)
             ax2.set_ylim(0, 1.0)
-            ax2.tick_params(axis='y', labelsize=FONT_SIZE)
+            ax2.tick_params(axis='y', labelsize=LABEL_FONT_SIZE)
             
-            # 添加温度曲线（右轴2，向外偏移）
+            # 添加温度曲线（右轴2，向外偏移）- 与Chapter4/test_Joint.py保持完全一致的颜色和线条样式
             ax3 = ax.twinx()
-            ax3.spines['right'].set_position(('outward', 80))  # 增加向外偏移距离到80
-            ax3.plot(times, power_data['temperature'], label='Environment Temperature', color=colors[4], alpha=0.7, linewidth=1.0)
-            ax3.set_ylabel('Temperature/°C', color=colors[4], fontsize=FONT_SIZE)
-            ax3.tick_params(axis='y', labelcolor=colors[4], labelsize=FONT_SIZE)
+            ax3.spines['right'].set_position(('outward', 65))  # 与test_Joint.py保持一致的偏移量
+            ax3.plot(times, power_data['temperature'], label='Environment Temperature', color=article_color[4], alpha=LINES_ALPHA, linewidth=1.5)
+            ax3.set_ylabel('Environment Temperature/°C', color=article_color[4], fontsize=LABEL_FONT_SIZE)
+            ax3.tick_params(axis='y', labelcolor=article_color[4], labelsize=LABEL_FONT_SIZE)
             ax3.set_ylim(-25, 40)
             
             # 配置子图
-            ax.set_title(scenario.replace('_', ' ').title(), fontsize=FONT_SIZE, fontweight='bold')
+            ax.set_title(scenario.replace('_', ' ').title(), fontsize=LABEL_FONT_SIZE, fontweight='bold')
             ax.grid(True, linestyle='--', alpha=0.5)
             ax.set_ylim(-2500, 5500)
             
             # 只在最后一行添加x轴标签
             if row == 2:
-                ax.set_xlabel('Time/s', fontsize=FONT_SIZE)
+                ax.set_xlabel('Time/s', fontsize=LABEL_FONT_SIZE)
             
             # 只在第一列添加y轴标签
             if col == 0:
-                ax.set_ylabel('Power/W', fontsize=FONT_SIZE)
+                ax.set_ylabel('Power/W', fontsize=LABEL_FONT_SIZE)
     
-    # 统一添加图例
-    fig.legend(['Power Demand', 'Power Fuel Cell', 'Power Battery', 'Power SuperCap', 
-               'Battery SOC', 'SuperCap SOC', 'Environment Temperature'], 
-               loc='upper center', bbox_to_anchor=(0.5, 0.02), ncol=4, fontsize=FONT_SIZE)
+    # 统一添加图例 - 与baseline_strategies.py保持完全一致
+    # 从第一个子图获取线条和标签，确保图例与实际图形一致
+    lines = []
+    labels = []
+    # 只需要在第一个子图中添加图例
+    if scenarios and (scenarios[0], strategy) in power_data_dict:
+        # 创建临时线条用于图例
+        import matplotlib.lines as mlines
+        lines = [
+            mlines.Line2D([], [], color=power_colors['load'], linewidth=2, alpha=LINES_ALPHA),
+            mlines.Line2D([], [], color=power_colors['fc'], linewidth=2, alpha=LINES_ALPHA),
+            mlines.Line2D([], [], color=power_colors['bat'], linewidth=2, alpha=LINES_ALPHA),
+            mlines.Line2D([], [], color=power_colors['sc'], linewidth=2, linestyle='--', alpha=LINES_ALPHA),
+            mlines.Line2D([], [], color=article_color[3], linewidth=1.5, alpha=LINES_ALPHA),
+            mlines.Line2D([], [], color='grey', linewidth=1.5, linestyle=':', alpha=LINES_ALPHA),
+            mlines.Line2D([], [], color=article_color[4], linewidth=1.5, alpha=LINES_ALPHA)
+        ]
+        labels = ['Power Demand', 'Power Fuel Cell', 'Power Battery', 'Power SuperCap',
+                  'Battery SOC', 'SuperCap SOC', 'Environment Temperature']
+    
+    fig.legend(lines, labels, loc='upper center', bbox_to_anchor=(0.5, 0.02), ncol=4, fontsize=LABEL_FONT_SIZE-2)
     
     # 调整布局
     plt.tight_layout(rect=[0, 0.05, 1, 0.95])
@@ -329,9 +358,17 @@ def generate_typical_scenarios_power_plot(scenarios, strategy, power_data_dict, 
     # 创建3x1子图
     fig, axes = plt.subplots(3, 1, figsize=(15, 18), sharex=True)
     fig.suptitle(f'Power Distribution for 3 Typical Profiles Rule Based  Strategy', fontsize=FONT_SIZE, fontweight='bold', y=0.98)
-    
-    # 颜色配置
-    colors = ['#f09639', '#c84343', '#42985e', '#8a7ab5', '#3570a8']
+    # 颜色配置 - 与Chapter4/test_Joint.py和baseline_strategies.py保持完全一致
+    article_color = ['#f09639', '#c84343', '#42985e', '#8a7ab5', '#3570a8']
+    power_colors = {
+        'load': article_color[0],  # 功率需求 - 橙色
+        'fc': article_color[1],     # 燃料电池 - 红色
+        'bat': article_color[2],    # 电池 - 绿色
+        'sc': 'k'                   # 超级电容 - 黑色
+    }
+    colors = article_color
+    LINES_ALPHA = 1
+    LABEL_FONT_SIZE = 18
     
     # 模态背景色映射
     mode_colors = {
@@ -357,43 +394,43 @@ def generate_typical_scenarios_power_plot(scenarios, strategy, power_data_dict, 
             power_data = result_data['power_data']
             times = np.arange(len(power_data['load_power']))
             
-            # 绘制功率曲线
-            l1, = ax.plot(times, power_data['load_power'], label='Power Demand', color=colors[0], linewidth=2)
-            l2, = ax.plot(times, power_data['power_fc'], label='Power Fuel Cell', color=colors[1], linewidth=2)
-            l3, = ax.plot(times, power_data['power_bat'], label='Power Battery', color=colors[2], linewidth=2)
-            l4, = ax.plot(times, power_data['power_sc'], label='Power SuperCap', color='k', linestyle='--', linewidth=2)
+            # 绘制功率曲线 - 与Chapter4/test_Joint.py保持完全一致的颜色和线条样式
+            l1, = ax.plot(times, power_data['load_power'], label='Power Demand', color=power_colors['load'], alpha=LINES_ALPHA, linewidth=2)
+            l2, = ax.plot(times, power_data['power_fc'], label='Power Fuel Cell', color=power_colors['fc'], alpha=LINES_ALPHA, linewidth=2)
+            l3, = ax.plot(times, power_data['power_bat'], label='Power Battery', color=power_colors['bat'], alpha=LINES_ALPHA, linewidth=2)
+            l4, = ax.plot(times, power_data['power_sc'], label='Power SuperCap', color=power_colors['sc'], alpha=LINES_ALPHA, linewidth=2, linestyle='--')
             
             # 配置子图
-            ax.set_title(scenario.replace('_', ' ').title(), fontsize=FONT_SIZE, fontweight='bold')
+            ax.set_title(scenario.replace('_', ' ').title(), fontsize=LABEL_FONT_SIZE, fontweight='bold')
             ax.grid(True, linestyle='--', alpha=0.5)
             ax.set_ylim(-2500, 5500)
-            ax.set_ylabel('Power/W', fontsize=FONT_SIZE)
-            ax.tick_params(axis='both', labelsize=FONT_SIZE)
+            ax.set_ylabel('Power/W', fontsize=LABEL_FONT_SIZE)
+            ax.tick_params(axis='both', labelsize=LABEL_FONT_SIZE)
             
-            # 为所有子图添加SOC曲线（右轴1）
+            # 为所有子图添加SOC曲线（右轴1）- 与Chapter4/test_Joint.py保持完全一致的颜色和线条样式
             ax2 = ax.twinx()
-            ax2.plot(times, power_data['soc_bat'], label='Battery SOC', color=colors[3], alpha=0.7, linewidth=1.5)
-            ax2.plot(times, power_data['soc_sc'], label='SuperCap SOC', color='grey', linestyle=':', alpha=0.7, linewidth=1.5)
-            ax2.set_ylabel('SOC', fontsize=FONT_SIZE)
+            ax2.plot(times, power_data['soc_bat'], label='Battery SOC', color=article_color[3], alpha=LINES_ALPHA, linewidth=1.5)
+            ax2.plot(times, power_data['soc_sc'], label='SuperCap SOC', color='grey', alpha=LINES_ALPHA, linewidth=1.5, linestyle=':')
+            ax2.set_ylabel('SOC', fontsize=LABEL_FONT_SIZE)
             ax2.set_ylim(0, 1.0)
-            ax2.tick_params(axis='y', labelsize=FONT_SIZE)
+            ax2.tick_params(axis='y', labelsize=LABEL_FONT_SIZE)
             
-            # 为所有子图添加温度曲线（右轴2，向外偏移）
+            # 为所有子图添加温度曲线（右轴2，向外偏移）- 与Chapter4/test_Joint.py保持完全一致的颜色和线条样式
             ax3 = ax.twinx()
             ax3.spines['right'].set_position(('outward', 65))  # 向外偏移65
-            ax3.plot(times, power_data['temperature'], label='Environment Temperature', color=colors[4], alpha=0.7, linewidth=1.5)
-            ax3.set_ylabel('Environment Temperature/°C', color=colors[4], fontsize=FONT_SIZE)
-            ax3.tick_params(axis='y', labelcolor=colors[4], labelsize=FONT_SIZE)
+            ax3.plot(times, power_data['temperature'], label='Environment Temperature', color=article_color[4], alpha=LINES_ALPHA, linewidth=1.5)
+            ax3.set_ylabel('Environment Temperature/°C', color=article_color[4], fontsize=LABEL_FONT_SIZE)
+            ax3.tick_params(axis='y', labelcolor=article_color[4], labelsize=LABEL_FONT_SIZE)
             ax3.set_ylim(-25, 40)
     
     # 添加统一的x轴标签
-    axes[-1].set_xlabel('Time/s', fontsize=FONT_SIZE)
-    axes[-1].tick_params(axis='x', labelsize=FONT_SIZE)
+    axes[-1].set_xlabel('Time/s', fontsize=LABEL_FONT_SIZE)
+    axes[-1].tick_params(axis='x', labelsize=LABEL_FONT_SIZE)
     
-    # 统一添加图例
+    # 统一添加图例 - 与baseline_strategies.py保持完全一致
     fig.legend(['Power Demand', 'Power Fuel Cell', 'Power Battery', 'Power SuperCap', 
                'Battery SOC', 'SuperCap SOC', 'Environment Temperature'], 
-               loc='upper center', bbox_to_anchor=(0.5, 0.02), ncol=4, fontsize=FONT_SIZE)
+               loc='upper center', bbox_to_anchor=(0.5, 0.02), ncol=4, fontsize=LABEL_FONT_SIZE-2)
     
     # 调整布局
     plt.tight_layout(rect=[0, 0.05, 1, 0.95])

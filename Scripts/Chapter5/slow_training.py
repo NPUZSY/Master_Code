@@ -177,7 +177,7 @@ class SlowTrainer:
         self.optimizer = optim.Adam(self.policy.parameters(), lr=lr, weight_decay=1e-5)
         # 添加学习率调度器，当奖励连续100轮不提升时，学习率乘以0.5
         self.lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            self.optimizer, mode='max', patience=100, factor=0.5
+            self.optimizer, mode='max', patience=1000, factor=0.8
         )
         # 跟踪当前学习率，用于日志提示
         self.current_lr = lr
@@ -186,15 +186,17 @@ class SlowTrainer:
         self.epsilon = epsilon
         
         # DQN训练参数
-        self.target_replace_iter = 100  # 目标网络更新频率
+        self.target_replace_iter = 10  # 目标网络更新频率
         self.learn_step_counter = 0  # 学习步数计数器
         self.batch_size = 32  # 批次大小
         self.pool_size = pool_size  # 池大小参数，用于计算经验池容量
         
-        # 经验回放池 - 先设置一个默认值，后续会根据环境的step_length动态调整
+        # 经验回放池 - 固定大小，不随环境动态调整
         self.memory = []
-        self.memory_capacity = 10000  # 默认经验池容量
-        self.max_step_length = 0  # 记录所有场景中的最大step_length
+        # 经验池大小固定为：1800s/场景 * 9个场景 * pool_size参数
+        self.memory_capacity = 1000 * 9 * self.pool_size
+        # 经验池填满标志
+        self.memory_full_notified = False
         
         # 9种场景的任务集合
         self.scenarios = [
@@ -216,14 +218,8 @@ class SlowTrainer:
         env = EnvUltra(scenario_type=scenario)
         state = env.reset()
         
-        # 更新最大step_length，用于计算经验池容量
-        with self.model_lock:
-            if hasattr(env, 'step_length') and env.step_length > self.max_step_length:
-                self.max_step_length = env.step_length
-                # 动态计算经验池容量：与JointNet保持一致的计算方式
-                new_capacity = max(self.max_step_length * self.pool_size, self.batch_size * 2)
-                if new_capacity != self.memory_capacity:
-                    self.memory_capacity = new_capacity
+        # 经验池大小已固定，无需动态调整
+        # 每个场景最大为1800s，共9个场景，乘以pool_size参数
         
         total_reward = 0.0
         steps = 0
@@ -287,7 +283,7 @@ class SlowTrainer:
             if done:
                 break
         
-        return total_reward / steps if steps > 0 else 0.0, experiences
+        return total_reward, experiences
     
     def update_from_experiences(self, all_experiences):
         """
@@ -304,6 +300,12 @@ class SlowTrainer:
                 # 如果回放池超过容量，删除最旧的经验
                 if len(self.memory) > self.memory_capacity:
                     self.memory.pop(0)
+                
+                # 检查经验池是否填满，并打印通知（只通知一次）
+                if len(self.memory) >= self.memory_capacity and not self.memory_full_notified:
+                    print(f"[INFO] 经验池已填满！当前容量: {len(self.memory)}/{self.memory_capacity}")
+                    print(f"[INFO] 经验池大小配置: 1800s/场景 * 9场景 * pool_size({self.pool_size}) = {1800 * 9 * self.pool_size}")
+                    self.memory_full_notified = True
         
         # 2. 当经验池足够大时，进行训练
         if len(self.memory) < self.batch_size:

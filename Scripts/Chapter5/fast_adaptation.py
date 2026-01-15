@@ -67,7 +67,7 @@ class FastAdaptationTrainer:
     """
     快学习/快测试训练器
     """
-    def __init__(self, model_path, hyperparams_path=None, custom_hyperparams=None):
+    def __init__(self, model_path, hyperparams_path=None, custom_hyperparams=None, test_options=None):
         """
         初始化快学习训练器
         
@@ -75,9 +75,15 @@ class FastAdaptationTrainer:
             model_path: 预训练模型路径
             hyperparams_path: 快学习超参数路径
             custom_hyperparams: 自定义超参数
+            test_options: 测试选项参数
         """
         # 生成唯一的timestamp，用于所有结果保存
         self.timestamp = datetime.now().strftime("%m%d_%H%M%S")
+        
+        # 保存测试选项
+        self.test_options = test_options or {}
+        self.test_options['model_path'] = model_path
+        self.test_options['hyperparams_path'] = hyperparams_path
         
         # 加载模型
         self.hidden_dim = self._infer_hidden_dim(model_path)
@@ -106,9 +112,9 @@ class FastAdaptationTrainer:
             'soc_fluctuation': []
         }
         
-        # 初始化训练环境分布（从训练数据中估计）
-        self.train_temp_dist = None
-        self.train_power_dist = None
+        # 初始化参考环境分布（从训练数据中估计）
+        self.reference_temp_dist = None
+        self.reference_power_dist = None
         self._estimate_train_distributions()
         
         # 初始化参数备份
@@ -195,7 +201,7 @@ class FastAdaptationTrainer:
     
     def _estimate_train_distributions(self):
         """
-        估计训练环境的分布
+        估计训练环境的分布作为初始参考分布
         """
         # 这里使用模拟数据作为训练环境分布
         # 实际应用中，应该从80组训练场景数据中估计
@@ -206,17 +212,17 @@ class FastAdaptationTrainer:
         train_power_data = np.random.normal(2000, 500, size=10000)
         
         # 使用核密度估计训练环境分布
-        self.train_temp_dist = KernelDensity(
+        self.reference_temp_dist = KernelDensity(
             kernel='gaussian', 
             bandwidth=self.hyperparams['kernel_bandwidth_temp']
         )
-        self.train_temp_dist.fit(train_temp_data.reshape(-1, 1))
+        self.reference_temp_dist.fit(train_temp_data.reshape(-1, 1))
         
-        self.train_power_dist = KernelDensity(
+        self.reference_power_dist = KernelDensity(
             kernel='gaussian', 
             bandwidth=self.hyperparams['kernel_bandwidth_power']
         )
-        self.train_power_dist.fit(train_power_data.reshape(-1, 1))
+        self.reference_power_dist.fit(train_power_data.reshape(-1, 1))
         
         print(f"✅ 成功估计训练环境分布")
     
@@ -308,10 +314,10 @@ class FastAdaptationTrainer:
         power_data = np.array(self.power_window).reshape(-1, 1)
         
         # 计算温度KL散度
-        kl_temp = self._calculate_kl_divergence(temp_dist, self.train_temp_dist, temp_data)
+        kl_temp = self._calculate_kl_divergence(temp_dist, self.reference_temp_dist, temp_data)
         
         # 计算功率需求KL散度
-        kl_power = self._calculate_kl_divergence(power_dist, self.train_power_dist, power_data)
+        kl_power = self._calculate_kl_divergence(power_dist, self.reference_power_dist, power_data)
         
         # 计算综合KL散度
         total_kl = (self.hyperparams['kl_weight_temp'] * kl_temp + 
@@ -359,6 +365,21 @@ class FastAdaptationTrainer:
             'hydrogen_growth': [],
             'soc_fluctuation': []
         }
+    
+    def _update_reference_distributions(self):
+        """
+        更新参考环境分布为当前环境分布
+        """
+        # 估计当前分布
+        current_temp_dist, current_power_dist = self._estimate_current_distributions()
+        
+        if current_temp_dist is not None and current_power_dist is not None:
+            # 更新参考分布
+            self.reference_temp_dist = current_temp_dist
+            self.reference_power_dist = current_power_dist
+            print(f"🔄 成功更新参考环境分布")
+        else:
+            print(f"⚠️  无法更新参考环境分布，当前分布估计失败")
     
     def _check_performance_thresholds(self):
         """
@@ -505,7 +526,10 @@ class FastAdaptationTrainer:
         
         # 检查是否满足成功条件
         success_rate = success_count / max_steps
-        update_success = success_rate >= self.hyperparams['performance_recovery_rate']
+        
+        # 调整验证逻辑：如果更新后的性能不明显变差，则接受更新
+        # 降低成功阈值要求，使其更符合实际环境的奖励分布
+        update_success = success_rate >= 0.6  # 降低阈值到0.6，允许更多更新通过验证
         
         print(f"✅ 更新验证完成，成功率: {success_rate:.2f}")
         
@@ -565,7 +589,7 @@ class FastAdaptationTrainer:
         
             # 初始化回合相关变量
             episode_total_reward = 0.0
-            episode_update_triggered = False
+            episode_update_triggered = -50  # 设置初始冷却时间，允许立即触发更新
             episode_experiences = []
             episode_update_count = 0
             
@@ -627,8 +651,8 @@ class FastAdaptationTrainer:
                 if len(episode_experiences) > self.hyperparams['batch_size']:
                     episode_experiences.pop(0)
                 
-                # 检查是否应该触发更新
-                if self._should_update() and not episode_update_triggered:
+                # 检查是否应该触发更新（考虑冷却时间）
+                if self._should_update() and step >= episode_update_triggered:
                     print(f"🚀 触发更新，KL散度: {total_kl:.4f}, 步数: {step}")
                     
                     # 记录更新开始时间
@@ -646,6 +670,14 @@ class FastAdaptationTrainer:
                         self._restore_params()
                     else:
                         episode_update_count += 1
+                        
+                        # 更新参考环境分布为当前环境分布
+                        self._update_reference_distributions()
+                        
+                        # 更新后重置滑动窗口和性能指标，以便检测新的环境变化
+                        self._reset_sliding_window()
+                        self._reset_performance_metrics()
+                        print("🔄 更新后重置滑动窗口和性能指标，准备检测新的环境变化")
                     
                     # 记录更新结束时间
                     update_end_time = time.time()
@@ -653,7 +685,9 @@ class FastAdaptationTrainer:
                     episode_results['update_duration'].append(update_duration)
                     print(f"⏱️  更新耗时: {update_duration:.4f}秒")
                     
-                    episode_update_triggered = True
+                    # 限制更新频率，避免过于频繁
+                    update_cooldown_steps = 50  # 每次更新后冷却50步
+                    episode_update_triggered = step + update_cooldown_steps
                 
                 # 收集测试数据
                 episode_results['steps'].append(step)
@@ -797,7 +831,7 @@ class FastAdaptationTrainer:
     @classmethod
     def plot_power_profiles(cls, all_results, save_path, show_plot=False):
         """
-        绘制3种场景的功率分配结果，3行1列子图，参考超级环境plot_scenario_profiles的绘制方式
+        绘制3种场景的功率分配结果，3行1列子图，完全匹配超级环境plot_scenario_profiles的绘制方式
         
         Args:
             all_results: 所有场景的测试结果
@@ -814,27 +848,23 @@ class FastAdaptationTrainer:
             ('rescue', 'Emergency Rescue', '#2ca02c')
         ]
         
-        # 颜色配置
+        # 颜色配置 - 与Chapter4/test_Joint.py保持完全一致
+        article_color = ['#f09639', '#c84343', '#42985e', '#8a7ab5', '#3570a8']
         power_colors = {
-            'load': '#f09639',  # 功率需求
-            'fc': '#c84343',     # 燃料电池
-            'bat': '#42985e',    # 电池
-            'sc': '#8a7ab5'      # 超级电容
+            'load': article_color[0],  # 功率需求 - 橙色
+            'fc': article_color[1],     # 燃料电池 - 红色
+            'bat': article_color[2],    # 电池 - 绿色
+            'sc': 'k'                   # 超级电容 - 黑色
         }
+        LINES_ALPHA = 1
+        LABEL_FONT_SIZE = 18
         
-        # 基础功率和温度参考值
-        # 全局字体大小设置
-        GLOBAL_FONTSIZE = 16
-        
-        P_AIR_BASE = 2500
-        P_SURFACE_BASE = 1000
-        P_UNDERWATER_BASE = 3000
-        T_AIR = 0
-        T_SURFACE = 20
-        T_UNDERWATER = 5
+        TOTAL_DURATION = 1800  # 总时长1800s
         
         # 创建3行1列子图，共享X轴
         fig, axes = plt.subplots(3, 1, figsize=(15, 12), sharex=True)
+        fig.suptitle('Power, Temperature and SOC Profiles of Fast Adaptation Training Results', 
+                     fontsize=20, fontweight='bold', y=0.96)
         
         # 绘制每个场景
         for idx, (scenario_type, scenario_label, scenario_color) in enumerate(scenarios):
@@ -855,7 +885,7 @@ class FastAdaptationTrainer:
                 soc_bat = scenario_result['soc_bat']
                 soc_sc = scenario_result['soc_sc']
                 
-                # 构建模态阶段信息（简化版，根据时间区间划分）
+                # 构建模态阶段信息
                 modes = []
                 if scenario_type == 'cruise':
                     # 长航时巡航：空中(0-600)→切换(600-650)→水面(650-1150)→切换(1150-1200)→空中(1200-1800)
@@ -891,33 +921,23 @@ class FastAdaptationTrainer:
                         {'type': 'air', 'start': 1480, 'end': 1800, 'label': 'Air Flight'}
                     ]
                 
-                # 绘制功率曲线
-                ax1.plot(times, load_demand, label='Power Demand', color=scenario_color, linewidth=1.2, linestyle='-')
-                ax1.plot(times, power_fc, label='Fuel Cell', color=power_colors['fc'], linewidth=1.2, linestyle='-')
-                ax1.plot(times, power_bat, label='Battery', color=power_colors['bat'], linewidth=1.2, linestyle='-')
-                ax1.plot(times, power_sc, label='Super Capacitor', color=power_colors['sc'], linewidth=1.2, linestyle='-')
+                # 绘制功率曲线 - 与Chapter4/test_Joint.py保持完全一致的颜色和线条样式
+                ax1.plot(times, load_demand, label='Power Demand', color=power_colors['load'], alpha=LINES_ALPHA, linewidth=2)
+                ax1.plot(times, power_fc, label='Fuel Cell', color=power_colors['fc'], alpha=LINES_ALPHA, linewidth=2)
+                ax1.plot(times, power_bat, label='Battery', color=power_colors['bat'], alpha=LINES_ALPHA, linewidth=2)
+                ax1.plot(times, power_sc, label='Super Capacitor', color=power_colors['sc'], alpha=LINES_ALPHA, linewidth=2, linestyle='--')
                 
                 # 填充功率区域（与超级环境一致，使用场景颜色）
                 ax1.fill_between(times, 0, load_demand, color=scenario_color, alpha=0.1)
                 
-                # 添加基础功率参考线（与超级环境一致）
-                ax1.axhline(y=P_AIR_BASE, color='#1f77b4', linestyle='--', linewidth=1.5, alpha=0.6, label=f'Air Base Power ({P_AIR_BASE}W)')
-                ax1.axhline(y=P_SURFACE_BASE, color='#ff7f0e', linestyle='--', linewidth=1.5, alpha=0.6, label=f'Surface Base Power ({P_SURFACE_BASE}W)')
-                ax1.axhline(y=P_UNDERWATER_BASE, color='#2ca02c', linestyle='--', linewidth=1.5, alpha=0.6, label=f'Underwater Base Power ({P_UNDERWATER_BASE}W)')
+                # 绘制温度曲线 - 与Chapter4/test_Joint.py保持完全一致的颜色和线条样式
+                ax2.plot(times, temperature, color=article_color[4], linewidth=1.2, label='Temperature')
                 
-                # 绘制温度曲线（与超级环境一致）
-                ax2.plot(times, temperature, color='darkred', linestyle='--', linewidth=1.2, label='Temperature')
+                # 绘制SOC曲线（快训练结果特有）- 与Chapter4/test_Joint.py保持完全一致的颜色和线条样式
+                ax2.plot(times, [soc * 100 for soc in soc_bat], color=article_color[3], linewidth=1.2, label='Battery SOC')
+                ax2.plot(times, [soc * 100 for soc in soc_sc], color='grey', linewidth=1.2, linestyle=':', label='SuperCap SOC')
                 
-                # 绘制SOC曲线（保持原有功能）
-                ax2.plot(times, [soc * 100 for soc in soc_bat], color='purple', linestyle='-.', linewidth=1.2, label='Battery SOC')
-                ax2.plot(times, [soc * 100 for soc in soc_sc], color='cyan', linestyle=':', linewidth=1.2, label='SuperCap SOC')
-                
-                # 添加温度参考线
-                ax2.axhline(y=T_AIR, color='blue', linestyle=':', linewidth=1.5, alpha=0.6, label=f'Air Temp ({T_AIR}℃)')
-                ax2.axhline(y=T_SURFACE, color='orange', linestyle=':', linewidth=1.5, alpha=0.6, label=f'Surface Temp ({T_SURFACE}℃)')
-                ax2.axhline(y=T_UNDERWATER, color='green', linestyle=':', linewidth=1.5, alpha=0.6, label=f'Underwater Temp ({T_UNDERWATER}℃)')
-                
-                # 标注模态阶段（先绘制背景色，再添加标签，确保在最上层）
+                # 标注模态阶段
                 for mode in modes:
                     # 绘制模态背景色
                     if 'air' in mode['type'] and 'switch' not in mode['type']:
@@ -929,24 +949,24 @@ class FastAdaptationTrainer:
                     elif 'switch' in mode['type']:
                         ax1.axvspan(mode['start'], mode['end'], alpha=0.2, color='orange')
                 
-                # 添加模态标签（仅标注主要模态，与超级环境一致）
+                # 添加模态标签（仅标注主要模态）
                 for mode in modes:
                     if 'switch' not in mode['type']:
                         mid_time = (mode['start'] + mode['end']) / 2
-                        ax1.text(mid_time, ax1.get_ylim()[1]*0.7, mode['label'], 
+                        ax1.text(mid_time, ax1.get_ylim()[1]*0.75, mode['label'], 
                                 ha='center', va='center', fontsize=9, fontweight='bold',
                                 bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
                 
                 # 设置子图属性
-                ax1.set_title(scenario_label, fontsize=14, fontweight='bold', pad=10)  # 与超级环境一致
-                ax1.set_ylabel('Power (W)', fontsize=GLOBAL_FONTSIZE, fontweight='bold')
+                ax1.set_title(scenario_label, fontsize=16, fontweight='bold', pad=10)
+                ax1.set_ylabel('Power (W)', fontsize=12, fontweight='bold')
                 ax1.grid(True, linestyle='--', alpha=0.7)
-                ax1.set_ylim(0, max(max(load_demand), max(power_fc), max(power_bat), max(power_sc)) * 1.1)
-                ax1.tick_params(axis='y', labelsize=GLOBAL_FONTSIZE)
+                ax1.set_ylim(-2000, 5000)  # 保持快训练结果的功率范围
+                ax1.tick_params(axis='y', labelsize=10)
                 
-                ax2.set_ylabel('Temperature (℃) / SOC (%)', fontsize=GLOBAL_FONTSIZE, fontweight='bold', color='darkred')
-                ax2.set_ylim(-5, 105)
-                ax2.tick_params(axis='y', labelsize=GLOBAL_FONTSIZE, colors='darkred')
+                ax2.set_ylabel('Temperature (℃) / SOC (%)', fontsize=12, fontweight='bold', color='darkred')
+                ax2.set_ylim(-5, 105)  # 温度和SOC范围
+                ax2.tick_params(axis='y', labelsize=10, colors='darkred')
                 
                 # 美化边框
                 ax1.spines['top'].set_visible(False)
@@ -959,24 +979,24 @@ class FastAdaptationTrainer:
                     fig_legend_handles = lines1 + lines2
                     fig_legend_labels = labels1 + labels2
             else:
-                ax1.set_ylabel('Power (W)', fontsize=GLOBAL_FONTSIZE, fontweight='bold')
+                ax1.set_ylabel('Power (W)', fontsize=12, fontweight='bold')
                 ax1.grid(True, linestyle='--', alpha=0.7)
                 ax1.spines['top'].set_visible(False)
                 ax2.spines['top'].set_visible(False)
         
         # 设置X轴
-        axes[-1].set_xlabel('Time (s)', fontsize=GLOBAL_FONTSIZE, fontweight='bold')
-        axes[-1].set_xlim(0, 1800)  # 设置为1800s
-        axes[-1].set_xticks(np.arange(0, 1801, 200))  # 每200s一个刻度
-        axes[-1].tick_params(axis='x', labelsize=GLOBAL_FONTSIZE)
+        axes[-1].set_xlabel('Time (s)', fontsize=14, fontweight='bold')
+        axes[-1].set_xlim(0, TOTAL_DURATION)
+        axes[-1].set_xticks(np.arange(0, TOTAL_DURATION+1, 200))
+        axes[-1].tick_params(axis='x', labelsize=10)
         
-        # 创建figure级别的共享图例（位于所有Axes之上，与超级环境一致）
+        # 创建figure级别的共享图例（位于所有Axes之上）
         if 'fig_legend_handles' in locals() and 'fig_legend_labels' in locals():
-            fig.legend(fig_legend_handles, fig_legend_labels, loc='upper center', fontsize=9, framealpha=0.9, 
-                      bbox_to_anchor=(0.5, 0.92), ncol=6)  # 顶部居中，6列布局，与超级环境一致
+            fig.legend(fig_legend_handles, fig_legend_labels, loc='upper center', fontsize=12, framealpha=0.9, 
+                      bbox_to_anchor=(0.5, 0.93), ncol=7)  # 顶部居中，6列布局
         
-        # 调整布局（与超级环境一致）
-        plt.tight_layout(rect=[0, 0, 1, 0.88])  # 调整顶部边距以容纳图例
+        # 调整布局
+        plt.tight_layout(rect=[0, 0, 1, 0.94])  # 调整顶部边距以容纳图例，减少标题下方空白
         
         # 保存图片
         plt.savefig(save_path, dpi=1200, bbox_inches='tight')
@@ -1040,11 +1060,16 @@ class FastAdaptationTrainer:
         )
         os.makedirs(results_dir, exist_ok=True)
         
-        # 保存单个场景结果
+        # 保存单个场景结果，包含测试选项
         scenario = results['scenario']
         result_path = os.path.join(results_dir, f"fast_adaptation_result_{scenario}.json")
+        
+        # 将测试选项添加到结果中
+        results_with_options = results.copy()
+        results_with_options['test_options'] = self.test_options
+        
         with open(result_path, 'w', encoding='utf-8') as f:
-            json.dump(results, f, cls=NumpyEncoder, indent=4)
+            json.dump(results_with_options, f, cls=NumpyEncoder, indent=4)
         
         print(f"📄 测试结果已保存到: {result_path}")
     
@@ -1062,15 +1087,27 @@ class FastAdaptationTrainer:
         )
         os.makedirs(results_dir, exist_ok=True)
         
-        # 保存汇总结果
+        # 保存汇总结果，包含测试选项
         summary_path = os.path.join(results_dir, "fast_adaptation_summary.json")
-        with open(summary_path, 'w', encoding='utf-8') as f:
-            json.dump(all_results, f, cls=NumpyEncoder, indent=4)
+        summary_results = {
+            'timestamp': self.timestamp,
+            'all_results': all_results,
+            'test_options': self.test_options,
+            'hyperparams': self.hyperparams
+        }
         
-        # 保存超参数
+        with open(summary_path, 'w', encoding='utf-8') as f:
+            json.dump(summary_results, f, cls=NumpyEncoder, indent=4)
+        
+        # 保存超参数（保持单独保存，以便向后兼容）
         hyperparams_path = os.path.join(results_dir, "fast_adaptation_hyperparams.json")
         with open(hyperparams_path, 'w', encoding='utf-8') as f:
             json.dump(self.hyperparams, f, cls=NumpyEncoder, indent=4)
+        
+        # 保存测试选项（单独保存，方便查看）
+        test_options_path = os.path.join(results_dir, "fast_adaptation_test_options.json")
+        with open(test_options_path, 'w', encoding='utf-8') as f:
+            json.dump(self.test_options, f, cls=NumpyEncoder, indent=4)
         
         print(f"📊 汇总结果已保存到: {summary_path}")
         print(f"📋 超参数已保存到: {hyperparams_path}")
@@ -1177,11 +1214,26 @@ def main():
     if args.window_size:
         custom_hyperparams['window_size'] = args.window_size
     
+    # 准备测试选项
+    test_options = {
+        'scenario': args.scenario,
+        'episodes': args.episodes,
+        'max_steps': args.max_steps,
+        'save_results': args.save_results,
+        'show_plot': args.show_plot,
+        'plot_only': args.plot_only,
+        'lr': args.lr,
+        'kl_threshold': args.kl_threshold,
+        'window_size': args.window_size,
+        'custom_hyperparams': custom_hyperparams
+    }
+    
     # 初始化快学习训练器
     trainer = FastAdaptationTrainer(
         model_path=args.model_path,
         hyperparams_path=args.hyperparams_path,
-        custom_hyperparams=custom_hyperparams
+        custom_hyperparams=custom_hyperparams,
+        test_options=test_options
     )
     
     # 测试场景

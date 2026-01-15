@@ -240,11 +240,11 @@ def plot_power_profiles(results, save_path, show_plot=False):
         # 设置子图背景色
         ax.set_facecolor(background_colors.get(scenario, 'white'))
         
-        # 绘制功率曲线
-        ax.plot(data['times'], data['load_demand'], label='Load Demand', color=colors['load'], linewidth=1.2)
-        ax.plot(data['times'], data['power_fc'], label='Fuel Cell', color=colors['fc'], linewidth=1.2)
-        ax.plot(data['times'], data['power_bat'], label='Battery', color=colors['bat'], linewidth=1.2)
-        ax.plot(data['times'], data['power_sc'], label='Super Capacitor', color=colors['sc'], linewidth=1.2)
+        # 绘制功率曲线 - 与Chapter4/test_Joint.py保持完全一致的颜色和线条样式
+        ax.plot(data['times'], data['load_demand'], label='Load Demand', color=colors['load'], alpha=1, linewidth=2)
+        ax.plot(data['times'], data['power_fc'], label='Fuel Cell', color=colors['fc'], alpha=1, linewidth=2)
+        ax.plot(data['times'], data['power_bat'], label='Battery', color=colors['bat'], alpha=1, linewidth=2)
+        ax.plot(data['times'], data['power_sc'], label='Super Capacitor', color=colors['sc'], alpha=1, linewidth=2, linestyle='--')
         
         # 配置子图
         ax.set_title(scenario.replace('_', ' ').title(), fontsize=12, fontweight='bold')
