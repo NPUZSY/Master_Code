@@ -76,13 +76,13 @@ class BaselineStrategies:
         best_power = current_fc_power
         
         # 1. 亏电状态：SOC < 0.2
-        if soc_bat < 0.2:
+        if soc_bat < 0.4:
             # 燃料电池全速提升输出功率
             # 选择最大的功率输出对应的索引
             best_idx, best_power = max(possible_actions, key=lambda x: x[1])
         
         # 2. 低电量状态：0.2 ≤ SOC < 0.5
-        elif 0.2 <= soc_bat < 0.5:
+        elif 0.4 <= soc_bat < 0.5:
             # 燃料电池使用大于功率需求的最小档位输出功率
             # 选择大于等于P_load的最小功率输出对应的索引
             candidates = [item for item in possible_actions if item[1] >= P_load]
@@ -100,7 +100,7 @@ class BaselineStrategies:
             best_idx, best_power = min(possible_actions, key=lambda x: abs(x[1] - P_load))
         
         # 4. 高电量状态：0.7 ≤ SOC < 0.9
-        elif 0.7 <= soc_bat < 0.9:
+        elif 0.7 <= soc_bat < 0.8:
             # 燃料电池使用小于功率需求的最大档位输出功率
             # 选择小于等于P_load的最大功率输出对应的索引
             candidates = [item for item in possible_actions if item[1] <= P_load]

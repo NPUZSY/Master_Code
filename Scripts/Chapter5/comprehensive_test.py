@@ -194,12 +194,20 @@ def test_chapter3_agent(env, agent_path, episodes=1, output_dir=None, strategy_n
         
         # 构造命令行参数
         chapter3_test_script = os.path.join(os.path.dirname(__file__), '../Chapter3/test.py')
+        
+        # 根据场景类型设置不同的最大测试时长
+        if env.scenario_type == 'default':
+            max_time = 800.0
+        else:
+            max_time = 1800.0
+            
         cmd = [
             sys.executable, chapter3_test_script,
             '--net-date', '1218',
             '--train-id', '36',
             '--use-ultra-env',
-            '--scenario', env.scenario_type
+            '--scenario', env.scenario_type,
+            '--max-time', str(max_time)
             # 移除--show-plot false，使用默认值
         ]
         
@@ -322,12 +330,20 @@ def test_chapter4_agent(env, agent_path, episodes=1, output_dir=None, strategy_n
         
         # 构造命令行参数
         chapter4_test_script = os.path.join(os.path.dirname(__file__), '../Chapter4/test_Joint.py')
+        
+        # 根据场景类型设置不同的最大测试时长
+        if env.scenario_type == 'default':
+            max_time = 800.0
+        else:
+            max_time = 1800.0
+            
         cmd = [
             sys.executable, chapter4_test_script,
             '--net-date', '1223',
             '--train-id', '2',
             '--use-ultra-env',
-            '--scenario', env.scenario_type
+            '--scenario', env.scenario_type,
+            '--max-time', str(max_time)
             # 移除--show-plot false，使用默认值
         ]
         
@@ -783,7 +799,12 @@ def run_comprehensive_test():
     
     # 定义测试策略 - 测试四种策略：第三章、第四章、第五章快学习和基线策略
     # 使用指定的最优慢学习模型路径
-    best_slow_model_path = '/home/siyu/Master_Code/nets/Chap5/slow_training/0113_100818/slow_training_model_best.pth'
+    # best_slow_model_path = '/home/siyu/Master_Code/nets/Chap5/slow_training/0113_100818/slow_training_model_best.pth'
+    # best_slow_model_path = '/home/siyu/Master_Code/nets/Chap5/slow_training/0113_152640/slow_training_model_best.pth'
+    # best_slow_model_path = '/home/siyu/Master_Code/nets/Chap5/slow_training/0114_155240/slow_training_model_best.pth'
+    best_slow_model_path = '/home/siyu/Master_Code/nets/Chap5/slow_training/0113_100846/slow_training_model_best.pth'
+
+    
     
     strategies = [
         {'name': 'Baseline', 'type': 'baseline', 'path': None, 'short_name': 'Baseline'},
