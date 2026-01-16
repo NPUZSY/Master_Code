@@ -1,4 +1,4 @@
-# 📘Meta-RL for CDV Energy Management
+# 📘 Meta-RL for CDV Energy Management
 Reinforcement Learning–based Energy Management Strategy for Composite-Drive Vehicles
 
 本仓库包含硕士论文《基于元强化学习的复合动力车辆能量管理策略研究》中全部相关代码，包括：
@@ -13,15 +13,25 @@ Reinforcement Learning–based Energy Management Strategy for Composite-Drive Ve
 
 ------------------------------------------------------------
 
-## 📦Repository Structure
+## 📦 Repository Structure
 ```commandline
 Meta-RL-CDV/
 ├── Scripts/            # 强化学习环境与算法实现
 │   ├── Env.py          # 自定义三能源系统环境（FC + Battery + SuperCap）
 │   ├── Chapter2/       # 第二章：基础理论与系统建模
 │   ├── Chapter3/       # 第三章：多智能体强化学习（MARL）
+│   │   ├── train.py    # MARL训练脚本
+│   │   ├── test.py     # MARL测试脚本
+│   │   └── retrain.sh  # MARL重训练脚本
 │   ├── Chapter4/       # 第四章：元强化学习（Meta-RL）
+│   │   ├── train_meta_policy.py  # Meta-RL训练脚本
+│   │   └── test_Joint.py         # Meta-RL测试脚本
 │   ├── Chapter5/       # 第五章：快速适应测试与性能分析
+│   │   ├── slow_training.py      # 慢训练脚本
+│   │   ├── fast_adaptation.py    # 快速适应测试脚本
+│   │   ├── baseline_Utral.py     # 基线策略测试脚本
+│   │   ├── slow_train.sh         # 慢训练执行脚本
+│   │   └── fast_test.sh          # 快速测试执行脚本
 │   ├── utils/          # 工具函数库
 │   ├── train.py        # 基础训练脚本
 │   └── test.py         # 基础测试脚本
@@ -35,7 +45,7 @@ Meta-RL-CDV/
 
 ------------------------------------------------------------
 
-## 🚗System Description
+## 🚗 System Description
 
 ### 1. 复合动力系统
 
@@ -66,7 +76,7 @@ CDV（Composite Drive Vehicle）由三种能源构成：
 - **侦察场景（Recon）**：跨域快速机动
 - **救援场景（Rescue）**：高强度功率需求
 
-## 🤖Algorithms Included
+## 🤖 Algorithms Included
 
 1. **Multi-Agent Reinforcement Learning (MARL)**
    - Independent Q-Learning (IQL)
@@ -88,7 +98,7 @@ CDV（Composite Drive Vehicle）由三种能源构成：
 
 ------------------------------------------------------------
 
-## 🧪How to Run
+## 🧪 How to Run
 
 ### 1. 环境配置
 ```bash
@@ -100,28 +110,151 @@ conda activate Meta-RL-310
 ### 2. 训练与测试
 
 #### 第三章：多智能体强化学习（MARL）
-```bash
-# 训练 MARL 模型
-python Scripts/Chapter3/train_MARL.py
 
-# 测试 MARL 模型
-python Scripts/Chapter3/test.py
+**训练 MARL 模型**
+```bash
+python Scripts/Chapter3/train.py
 ```
 
-#### 第四章：元强化学习（Meta-RL）
+**可选参数**
+- `--resume-training`：从已有模型继续训练
+- `--pretrain-date`：预训练模型的日期文件夹
+- `--pretrain-train-id`：预训练模型的训练ID
+- `--pretrain-model-prefix`：预训练模型的前缀
+- `--epsilon`：探索率（默认：0.3）
+- `--episode`：训练回合数（默认：500）
+- `--lr`：学习率（默认：0.0001）
+
+**重训练示例**
 ```bash
-# 训练 Meta-RL 模型
+# 从已有模型继续训练
+python ./Scripts/Chapter3/train.py \
+--resume-training --pretrain-date 1213 --pretrain-train-id 30 \
+--pretrain-model-prefix bs64_lr1_ep_354_pool100_freq50_MARL_FROM_SCRATCH_bs64_lr1_MARL_IQL_32x20x2_MAX_R-17 \
+--epsilon 0.8 --episode 500 --lr 0.00001
+```
+
+**测试 MARL 模型**
+```bash
+python Scripts/Chapter3/test.py \
+--net-date 1218 \
+--train-id 36 \
+--use-ultra-env \
+--scenario cruise
+```
+
+**可选参数**
+- `--net-date`：模型所在的日期文件夹
+- `--train-id`：模型对应的训练ID
+- `--use-ultra-env`：使用超级环境
+- `--scenario`：测试场景（default/cruise/recon/rescue）
+- `--max-time`：最大测试时长（秒，默认：800）
+
+#### 第四章：元强化学习（Meta-RL）
+
+**训练 Meta-RL 模型**
+```bash
 python Scripts/Chapter4/train_meta_policy.py
 ```
 
-#### 第五章：快速适应测试与性能分析
+**测试 Meta-RL 模型**
 ```bash
-# 运行快速适应测试
-python Scripts/Chapter5/fast_adaptation.py
-
-# 可选参数
-python Scripts/Chapter5/fast_adaptation.py --scenario cruise --max-steps 1000 --episodes 5
+python Scripts/Chapter4/test_Joint.py \
+--net-date 1223 \
+--train-id 2 \
+--use-ultra-env \
+--scenario cruise
 ```
+
+**可选参数**
+- `--net-date`：模型所在的日期文件夹
+- `--train-id`：模型对应的训练ID
+- `--use-ultra-env`：使用超级环境
+- `--scenario`：测试场景（default/cruise/recon/rescue）
+- `--max-time`：最大测试时长（秒，默认：800）
+
+#### 第五章：慢速训练（Slow Training）
+
+**训练 Slow Training 模型**
+```bash
+python Scripts/Chapter5/slow_training.py
+```
+
+**可选参数**
+- `--num-epochs`：训练轮数（默认：2000）
+- `--epsilon`：探索率（默认：0.3）
+- `--gamma`：折扣因子（默认：0.9）
+- `--lr`：学习率（默认：0.0005）
+- `--hidden-dim`：隐藏层维度（默认：256）
+- `--pool-size`：经验池大小（默认：50）
+- `--load-model-path`：加载模型路径
+- `--from-joint-net`：从 Joint Net 模型开始训练
+
+**训练示例**
+```bash
+# 从零开始训练
+nohup python /home/siyu/Master_Code/Scripts/Chapter5/slow_training.py \
+--num-epochs 2000 \
+--epsilon 0.3 \
+--gamma 0.9 \
+--lr 0.0005 \
+--hidden-dim 256 \
+--pool-size 50 \
+--load-model-path /home/siyu/Master_Code/nets/Chap5/slow_training/0113_100818/slow_training_model_best.pth \
+> logs/0114/4_W2_20_W2_01_lr_00005_From0113_100818.log 2>&1 &
+
+# 从 Joint Net 开始训练
+nohup python /home/siyu/Master_Code/Scripts/Chapter5/slow_training.py \
+--epsilon 0.2 \
+--from-joint-net /home/siyu/Master_Code/nets/Chap4/Joint_Net/1223/3 \
+--num-epochs 5000 \
+--hidden-dim 256 \
+--pool-size 200 \
+> logs/0110/slow_train_from_joint_tracking_reward.log 2>&1 &
+```
+
+#### 第五章：快速适应测试（Fast Adaptation）
+
+**运行快速适应测试**
+```bash
+python Scripts/Chapter5/fast_adaptation.py
+```
+
+**可选参数**
+- `--model-path`：预训练模型路径
+- `--hyperparams-path`：快学习超参数路径
+- `--scenario`：测试场景名称（默认：所有场景）
+- `--episodes`：测试回合数（默认：1）
+- `--max-steps`：每个场景的最大测试步数（默认：1800）
+- `--save-results`：是否保存测试结果
+- `--show-plot`：是否显示测试结果图
+- `--plot-only`：路径到之前保存的结果，跳过测试直接绘图
+- `--lr`：学习率
+- `--kl-threshold`：KL散度阈值
+- `--window-size`：滑动窗口大小
+
+**测试示例**
+```bash
+python /home/siyu/Master_Code/Scripts/Chapter5/fast_adaptation.py \
+--model-path /home/siyu/Master_Code/nets/Chap5/slow_training/0114_134418/slow_training_model_best.pth \
+--scenario classical \
+--save-results
+```
+
+#### 第五章：基线策略测试（Baseline）
+
+**运行基线策略测试**
+```bash
+python Scripts/Chapter5/baseline_Utral.py
+```
+
+**可选参数**
+- `--scenario`：测试场景名称（默认：所有场景）
+- `--episodes`：测试回合数（默认：1）
+- `--max-steps`：每个场景的最大测试步数（默认：1800）
+- `--save-results`：是否保存测试结果
+- `--show-plot`：是否显示测试结果图
+- `--plot-only`：路径到之前保存的结果，跳过测试直接绘图
 
 ### 3. 输出结果
 
@@ -147,10 +280,9 @@ python Scripts/Chapter5/fast_adaptation.py --scenario cruise --max-steps 1000 --
 - **图表输出**：保存在 `Figures/` 目录下，包含 SVG 和高清 PNG 格式
 - **测试结果**：以 JSON 格式保存，包含详细的性能数据和计时统计
 
-
 ------------------------------------------------------------
 
-## 📊Example Outputs
+## 📊 Example Outputs
 
 ### 1. 性能可视化
 
@@ -198,23 +330,23 @@ python Scripts/Chapter5/fast_adaptation.py --scenario cruise --max-steps 1000 --
 
 ------------------------------------------------------------
 
-## 🔍Citation
+## 🔍 Citation
 
 如在研究中使用本仓库，请引用：
 
-Z. S. Yuan, “Meta-Reinforcement Learning for Composite-Drive Vehicle Energy Management,”  
+Z. S. Yuan, "Meta-Reinforcement Learning for Composite-Drive Vehicle Energy Management,"  
 Master Thesis, Northwestern Polytechnical University, 2025.
 
 
 ------------------------------------------------------------
 
-## 📝License
+## 📝 License
 
 本仓库仅限科研与学术用途。商业用途请联系作者。
 
 ------------------------------------------------------------
 
-## 🙌Acknowledgements
+## 🙌 Acknowledgements
 
 本项目部分参考：
 

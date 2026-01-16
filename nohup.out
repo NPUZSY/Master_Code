@@ -1,176 +1,0 @@
-================================================================================
-                    JointNet训练配置确认                  
-================================================================================
-训练模式: 继续训练（基于已有模型）
-预训练模型配置:
-  - 日期文件夹: 1219
-  - Train ID: 1
-  - 模型前缀: Joint_Model
-  - 初始RNN路径: 【继续训练模式，不使用】
-核心超参数:
-  - 批大小: 32
-  - 学习率: 0.000010
-  - 探索率: 0.9
-  - 训练回合数: 4000
-================================================================================
-
-
-📌 开始加载包含RNN的完整预训练JointNet模型...
-
-📌 检测到FC模型包含RNN参数，加载完整Joint模型...
-✅ 成功加载包含RNN的FC完整Joint模型: /home/siyu/Master_Code/nets/Chap4/Joint_Net/1219/1/Joint_Model_FC.pth
-
-📌 检测到BAT模型包含RNN参数，加载完整Joint模型...
-✅ 成功加载包含RNN的BAT完整Joint模型: /home/siyu/Master_Code/nets/Chap4/Joint_Net/1219/1/Joint_Model_BAT.pth
-
-📌 检测到SC模型包含RNN参数，加载完整Joint模型...
-✅ 成功加载包含RNN的SC完整Joint模型: /home/siyu/Master_Code/nets/Chap4/Joint_Net/1219/1/Joint_Model_SC.pth
-✅ 成功加载所有包含RNN的完整JointNet智能体
-
-🚀 JointNet训练开始 [ID: 1] [Device: cuda]
-JointNet Training:   0%|          | 0/4000 [00:00<?, ?it/s]JointNet Training:   0%|          | 0/4000 [00:03<?, ?it/s, Rew=-32364.03, LR=1.00e-05, Mem=799, Loss=0.0000, Time=3.78s]JointNet Training:   0%|          | 1/4000 [00:03<4:12:50,  3.79s/it, Rew=-32364.03, LR=1.00e-05, Mem=799, Loss=0.0000, Time=3.78s]JointNet Training:   0%|          | 1/4000 [00:07<4:12:50,  3.79s/it, Rew=-32205.78, LR=1.00e-05, Mem=1598, Loss=0.0000, Time=7.08s]JointNet Training:   0%|          | 2/4000 [00:07<3:53:30,  3.50s/it, Rew=-32205.78, LR=1.00e-05, Mem=1598, Loss=0.0000, Time=7.08s]JointNet Training:   0%|          | 2/4000 [00:10<3:53:30,  3.50s/it, Rew=-33021.25, LR=1.00e-05, Mem=2397, Loss=0.0000, Time=10.41s]JointNet Training:   0%|          | 3/4000 [00:10<3:47:41,  3.42s/it, Rew=-33021.25, LR=1.00e-05, Mem=2397, Loss=0.0000, Time=10.41s]JointNet Training:   0%|          | 3/4000 [00:13<3:47:41,  3.42s/it, Rew=-29475.60, LR=1.00e-05, Mem=3196, Loss=0.0000, Time=13.82s]JointNet Training:   0%|          | 4/4000 [00:13<3:47:50,  3.42s/it, Rew=-29475.60, LR=1.00e-05, Mem=3196, Loss=0.0000, Time=13.82s]JointNet Training:   0%|          | 4/4000 [00:17<3:47:50,  3.42s/it, Rew=-39849.38, LR=1.00e-05, Mem=3995, Loss=0.0000, Time=17.31s]JointNet Training:   0%|          | 5/4000 [00:17<3:49:05,  3.44s/it, Rew=-39849.38, LR=1.00e-05, Mem=3995, Loss=0.0000, Time=17.31s]JointNet Training:   0%|          | 5/4000 [00:20<3:49:05,  3.44s/it, Rew=-21694.08, LR=1.00e-05, Mem=4794, Loss=0.0000, Time=20.81s]JointNet Training:   0%|          | 6/4000 [00:20<3:50:33,  3.46s/it, Rew=-21694.08, LR=1.00e-05, Mem=4794, Loss=0.0000, Time=20.81s]JointNet Training:   0%|          | 6/4000 [00:24<3:50:33,  3.46s/it, Rew=-30445.03, LR=1.00e-05, Mem=5593, Loss=0.0000, Time=24.32s]JointNet Training:   0%|          | 7/4000 [00:24<3:51:19,  3.48s/it, Rew=-30445.03, LR=1.00e-05, Mem=5593, Loss=0.0000, Time=24.32s]JointNet Training:   0%|          | 7/4000 [00:24<3:52:13,  3.49s/it, Rew=-30445.03, LR=1.00e-05, Mem=5593, Loss=0.0000, Time=24.32s]
-
-=============================================
-🚀 回合 1 耗时分解 (总耗时: 3.7707 s)
----------------------------------------------
-| DQN_Learn       |    2.2794 s |  60.45 % |
-| Action_Select   |    1.4053 s |  37.27 % |
-| Env_Step        |    0.0788 s |   2.09 % |
-| Data_Store      |    0.0072 s |   0.19 % |
-=============================================
-
---- New Max Reward: -32364.03 ---
---- 已保存包含RNN的完整Joint模型到: /home/siyu/Master_Code/nets/Chap4/Joint_Net/0109/1 ---
-
-=============================================
-🚀 回合 2 耗时分解 (总耗时: 3.2831 s)
----------------------------------------------
-| DQN_Learn       |    1.9681 s |  59.95 % |
-| Action_Select   |    1.2402 s |  37.78 % |
-| Env_Step        |    0.0678 s |   2.07 % |
-| Data_Store      |    0.0069 s |   0.21 % |
-=============================================
-
---- New Max Reward: -32205.78 ---
---- 已保存包含RNN的完整Joint模型到: /home/siyu/Master_Code/nets/Chap4/Joint_Net/0109/1 ---
-
---- New Max Reward: -29475.60 ---
---- 已保存包含RNN的完整Joint模型到: /home/siyu/Master_Code/nets/Chap4/Joint_Net/0109/1 ---
-
---- New Max Reward: -21694.08 ---
---- 已保存包含RNN的完整Joint模型到: /home/siyu/Master_Code/nets/Chap4/Joint_Net/0109/1 ---
-Traceback (most recent call last):
-  File "/home/siyu/Master_Code/Scripts/Chapter4/train_Joint.py", line 521, in <module>
-    l2 = Bat_Agent.learn(1, N_STATES, GAMMA, TARGET_REPLACE_ITER, BATCH_SIZE) or 0.0
-  File "/home/siyu/Master_Code/Scripts/Chapter3/MARL_Engine.py", line 114, in learn
-    loss.backward()
-  File "/home/nwpu/miniconda3/envs/Py310/lib/python3.10/site-packages/torch/_tensor.py", line 625, in backward
-    torch.autograd.backward(
-  File "/home/nwpu/miniconda3/envs/Py310/lib/python3.10/site-packages/torch/autograd/__init__.py", line 354, in backward
-    _engine_run_backward(
-  File "/home/nwpu/miniconda3/envs/Py310/lib/python3.10/site-packages/torch/autograd/graph.py", line 841, in _engine_run_backward
-    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
-KeyboardInterrupt
-================================================================================
-                    JointNet训练配置确认                  
-================================================================================
-训练模式: 继续训练（基于已有模型）
-预训练模型配置:
-  - 日期文件夹: 1219
-  - Train ID: 1
-  - 模型前缀: Joint_Model
-  - 初始RNN路径: 【继续训练模式，不使用】
-核心超参数:
-  - 批大小: 32
-  - 学习率: 0.000010
-  - 探索率: 0.9
-  - 训练回合数: 4000
-================================================================================
-
-
-📌 开始加载包含RNN的完整预训练JointNet模型...
-
-📌 检测到FC模型包含RNN参数，加载完整Joint模型...
-✅ 成功加载包含RNN的FC完整Joint模型: /home/siyu/Master_Code/nets/Chap4/Joint_Net/1219/1/Joint_Model_FC.pth
-
-📌 检测到BAT模型包含RNN参数，加载完整Joint模型...
-✅ 成功加载包含RNN的BAT完整Joint模型: /home/siyu/Master_Code/nets/Chap4/Joint_Net/1219/1/Joint_Model_BAT.pth
-
-📌 检测到SC模型包含RNN参数，加载完整Joint模型...
-✅ 成功加载包含RNN的SC完整Joint模型: /home/siyu/Master_Code/nets/Chap4/Joint_Net/1219/1/Joint_Model_SC.pth
-✅ 成功加载所有包含RNN的完整JointNet智能体
-
-🚀 JointNet训练开始 [ID: 2] [Device: cuda]
-JointNet Training:   0%|          | 0/4000 [00:00<?, ?it/s]JointNet Training:   0%|          | 0/4000 [00:02<?, ?it/s]
-Traceback (most recent call last):
-  File "/home/siyu/Master_Code/Scripts/Chapter4/train_Joint.py", line 521, in <module>
-    l2 = Bat_Agent.learn(1, N_STATES, GAMMA, TARGET_REPLACE_ITER, BATCH_SIZE) or 0.0
-  File "/home/siyu/Master_Code/Scripts/Chapter3/MARL_Engine.py", line 115, in learn
-    self.optimizer.step()
-  File "/home/nwpu/miniconda3/envs/Py310/lib/python3.10/site-packages/torch/optim/optimizer.py", line 497, in wrapper
-    @functools.wraps(func)
-KeyboardInterrupt
-================================================================================
-                    JointNet训练配置确认                  
-================================================================================
-训练模式: 继续训练（基于已有模型）
-预训练模型配置:
-  - 日期文件夹: 1219
-  - Train ID: 1
-  - 模型前缀: Joint_Model
-  - 初始RNN路径: 【继续训练模式，不使用】
-核心超参数:
-  - 批大小: 32
-  - 学习率: 0.000010
-  - 探索率: 0.9
-  - 训练回合数: 4000
-================================================================================
-
-
-📌 开始加载包含RNN的完整预训练JointNet模型...
-
-📌 检测到FC模型包含RNN参数，加载完整Joint模型...
-✅ 成功加载包含RNN的FC完整Joint模型: /home/siyu/Master_Code/nets/Chap4/Joint_Net/1219/1/Joint_Model_FC.pth
-
-📌 检测到BAT模型包含RNN参数，加载完整Joint模型...
-✅ 成功加载包含RNN的BAT完整Joint模型: /home/siyu/Master_Code/nets/Chap4/Joint_Net/1219/1/Joint_Model_BAT.pth
-
-📌 检测到SC模型包含RNN参数，加载完整Joint模型...
-✅ 成功加载包含RNN的SC完整Joint模型: /home/siyu/Master_Code/nets/Chap4/Joint_Net/1219/1/Joint_Model_SC.pth
-✅ 成功加载所有包含RNN的完整JointNet智能体
-
-🚀 JointNet训练开始 [ID: 3] [Device: cuda]
-JointNet Training:   0%|          | 0/4000 [00:00<?, ?it/s]JointNet Training:   0%|          | 0/4000 [00:03<?, ?it/s]
-Traceback (most recent call last):
-  File "/home/siyu/Master_Code/Scripts/Chapter4/train_Joint.py", line 522, in <module>
-    l3 = SC_Agent.learn(2, N_STATES, GAMMA, TARGET_REPLACE_ITER, BATCH_SIZE) or 0.0
-  File "/home/siyu/Master_Code/Scripts/Chapter3/MARL_Engine.py", line 97, in learn
-    sample_index = np.random.choice(self.shared_memory.shape[0], batch_size)
-  File "numpy/random/mtrand.pyx", line 982, in numpy.random.mtrand.RandomState.choice
-  File "/home/nwpu/miniconda3/envs/Py310/lib/python3.10/site-packages/numpy/core/fromnumeric.py", line 3100, in prod
-    return _wrapreduction(a, np.multiply, 'prod', axis, dtype, out,
-  File "/home/nwpu/miniconda3/envs/Py310/lib/python3.10/site-packages/numpy/core/fromnumeric.py", line 88, in _wrapreduction
-    return ufunc.reduce(obj, axis, dtype, out, **passkwargs)
-KeyboardInterrupt
-Traceback (most recent call last):
-  File "/home/siyu/Master_Code/Scripts/Chapter5/slow_training.py", line 36, in <module>
-    from Scripts.Chapter5.Meta_RL_Engine import (
-  File "/home/siyu/Master_Code/Scripts/Chapter5/Meta_RL_Engine.py", line 16, in <module>
-    from scipy.stats import norm, gaussian_kde
-  File "/home/nwpu/miniconda3/envs/Py310/lib/python3.10/site-packages/scipy/stats/__init__.py", line 624, in <module>
-    from ._stats_py import *
-  File "/home/nwpu/miniconda3/envs/Py310/lib/python3.10/site-packages/scipy/stats/_stats_py.py", line 52, in <module>
-    from . import distributions
-  File "/home/nwpu/miniconda3/envs/Py310/lib/python3.10/site-packages/scipy/stats/distributions.py", line 10, in <module>
-    from . import _continuous_distns
-  File "/home/nwpu/miniconda3/envs/Py310/lib/python3.10/site-packages/scipy/stats/_continuous_distns.py", line 9662, in <module>
-    skewcauchy = skewcauchy_gen(name='skewcauchy')
-  File "/home/nwpu/miniconda3/envs/Py310/lib/python3.10/site-packages/scipy/stats/_distn_infrastructure.py", line 1894, in __init__
-    self._construct_doc(docdict, dct.get(self.name))
-  File "/home/nwpu/miniconda3/envs/Py310/lib/python3.10/site-packages/scipy/stats/_distn_infrastructure.py", line 854, in _construct_doc
-    self.__doc__ = doccer.docformat(self.__doc__, tempdict)
-  File "/home/nwpu/miniconda3/envs/Py310/lib/python3.10/site-packages/scipy/_lib/doccer.py", line 72, in docformat
-    icount = indentcount_lines(lines[1:])
-  File "/home/nwpu/miniconda3/envs/Py310/lib/python3.10/site-packages/scipy/_lib/doccer.py", line 261, in indentcount_lines
-    stripped = line.lstrip()
-KeyboardInterrupt
